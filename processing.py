@@ -5,7 +5,7 @@ Turns raw sensor readings into things a person can act on.
 
     raw distance -> water level -> storms -> how the basin responded -> status
 
-It does NOT care whether the data is simulated or real: as long as the readings
+It does NOT care where the readings come from (USB bridge today, LoRaWAN later): as long as the readings
 follow the data contract (basin_id, timestamp, distance_cm, battery_v), it works.
 
 TWO SEPARATE QUESTIONS
@@ -31,7 +31,6 @@ correct it each time a crew measures the sump during a cleaning.
 All decision rules are the THRESHOLDS below: first guesses, to tune with pilot data.
 """
 
-import os
 
 import numpy as np
 import pandas as pd
@@ -132,17 +131,6 @@ def format_level(level_cm):
     """+12 cm, -2 cm or 0 cm (never '-0 cm')."""
     v = int(round(level_cm))
     return "0 cm" if v == 0 else f"{v:+d} cm"
-
-
-# ---------------------------------------------------------------------------
-# 1. LOADING
-# ---------------------------------------------------------------------------
-def load_network(network, folder="."):
-    basins = pd.read_csv(os.path.join(folder, "data", f"basins_{network}.csv"))
-    readings = pd.read_csv(os.path.join(folder, "output", f"readings_{network}.csv"),
-                           parse_dates=["timestamp"])
-    rain = pd.read_csv(os.path.join(folder, "output", f"rain_{network}.csv"), parse_dates=["timestamp"])
-    return basins, readings, rain
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +311,9 @@ def basin_status(basin, levels, events, rain, now, reset=None):
     r["trend"] = "↑ Rising" if change > 2 else "↓ Draining" if change < -2 else "→ Stable"
     r.update(level_cm=float(last["level_cm"]), at_sensor_limit=bool(last["at_sensor_limit"]),
              last_reading=last["timestamp"], minutes_since_reading=minutes_since,
-             battery_v=float(last["battery_v"]),
-             battery_status=("urgent" if last["battery_v"] < BATTERY_CRITICAL_V else
+             battery_v=None if pd.isna(last["battery_v"]) else float(last["battery_v"]),   # None: USB powered
+             battery_status=("ok" if pd.isna(last["battery_v"]) else
+                             "urgent" if last["battery_v"] < BATTERY_CRITICAL_V else
                              "watch" if last["battery_v"] < BATTERY_LOW_V else "ok"))
 
     # ---- 1. LIVE STATE ----
@@ -445,7 +434,7 @@ def storm_sentence(ev, basin, last):
 # 6. DISPATCHER VIEW: short answers for someone deciding in 3 seconds
 # ---------------------------------------------------------------------------
 def battery_pct(volts):
-    if volts is None:
+    if volts is None or pd.isna(volts):        # no battery reported (e.g. powered by USB)
         return None
     return int(round(100 * np.clip((volts - BATTERY_EMPTY_V) / (BATTERY_FULL_V - BATTERY_EMPTY_V), 0, 1)))
 

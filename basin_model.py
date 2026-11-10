@@ -12,7 +12,7 @@ What a city technician usually knows (everything measured DOWN from the grate):
     * whether there is a cast-iron trap (cloche) over the outlet
     * where our sensor pod was mounted (default 400 mm below the grate)
 
-build_row() turns that into one row of the basins CSV, which the simulator,
+build_row() turns that into one row of the basins CSV, which the dashboard,
 processing and drawing all use. The CSV works in cm measured UP from the sump floor.
 (basin_catalog.py keeps the Lécuyer precast catalogue as a reference.)
 """
@@ -36,9 +36,9 @@ def default_config():
         "diameter_mm": 610, "invert_depth_mm": 1400, "outlet_mm": 250, "has_trap": True,
         "sump_mm": 300, "inlets": [], "sensor_depth_mm": DEFAULT_SENSOR_DEPTH_MM,
         "blind_zone_mm": DEFAULT_BLIND_ZONE_MM,
-        # simulator only
+        # only used to ESTIMATE the sediment in the sump (the sensor can't see under water)
         "catchment_m2": 600, "runoff_coeff": 0.9, "sediment_yield": 0.15,
-        "sediment_at_install_mm": 50, "sim_scenario": "healthy",
+        "sediment_at_install_mm": 50, "sim_scenario": "",
     }
 
 

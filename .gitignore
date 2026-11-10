@@ -15,3 +15,6 @@ Thumbs.db
 
 # The full Ville de Montréal file is too big for GitHub (78 MB): only the slice in data/ is needed
 ego_puisard_p.csv
+
+# Written by sensor_bridge.py on each computer (which port, last reading)
+data/sensor_status.json

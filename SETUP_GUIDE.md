@@ -33,7 +33,7 @@ type `py` everywhere this guide says `python`.
 You already have GitHub Desktop and an account.
 
 1. Unzip `drainshield.zip` into `Documents\GitHub\` (create the `GitHub` folder if needed).
-   You should end up with `Documents\GitHub\drainshield\` containing `README.md`, `simulate.py`, etc.
+   You should end up with `Documents\GitHub\drainshield\` containing `README.md`, `app.py`, etc.
    (Make sure it's not doubled, like `drainshield\drainshield\`.)
 2. Open **GitHub Desktop** → **File → Add local repository…** → choose the `drainshield` folder.
 3. It will say *"This directory does not appear to be a Git repository"*.
@@ -63,8 +63,8 @@ You already have GitHub Desktop and an account.
 python -m pip install -r requirements.txt
 ```
 
-This installs `numpy` (math), `pandas` (tables of data), `matplotlib` (plots),
-`streamlit` (turns a Python script into a web page) and `plotly` (interactive charts).
+This installs `numpy` (math), `pandas` (tables of data), `streamlit` (turns a Python script into a
+web page), `plotly` (interactive charts) and `pyserial` (talks to the Arduino over USB).
 If you already did this step before, run it again: the list has new libraries.
 
 ## 5. Open the dashboard
@@ -76,48 +76,62 @@ python -m streamlit run app.py
 ```
 (or `py -m streamlit run app.py` if `python` isn't found)
 
-Your web browser opens the dashboard (the first time it takes a few extra seconds to make the
-fake data). If it asks for an email, just press Enter. The terminal stays busy while the
-dashboard is running: that's normal. **To stop it, click in the terminal and press Ctrl+C.**
+Your web browser opens the dashboard. If it asks for an email, just press Enter. The terminal stays
+busy while the dashboard is running: that's normal. **To stop it, click in the terminal and press Ctrl+C.**
 
-The **Network** page opens first: the weather readiness banner, a map of every basin and a dispatch
-list. Click a pin or search a basin to see its card. Use the **Demo replay** slider on the left
-(or the buttons under it) to move through the two simulated months. Try **Before storm**: basins
-with slow drainage turn red ("inspect before storm"). Then **Storm (Oct 15)** to see basins backing up.
-Switch **View** between **Crew** (simple) and **Engineering** (sensor health, hydrographs, history).
-
-On a basin's page, **Log maintenance** records a crew visit. "Cleaned / vacuumed" closes the issue.
-The log is saved in `data/maintenance_log.csv`.
-
-To add a basin, click **Add basin**. Pick one of the city's catch basins (or type the position),
-enter the IDs and what's on the as-built plan, and click **Save basin**. Your basins are saved in
-`data/basins_user.csv`: commit that file in GitHub Desktop to share them with the team.
+The **Network** page shows all 5,035 Dorval catch basins as grey dots (no sensor yet). There is no
+demo data any more: everything you see comes from real sensors.
 
 If the map stays blank, your internet may be blocking the map tiles: turn off
 **Street map** in the sidebar to see the dots on a plain background.
 
-If you change the code while it's running, click **Rerun** at the top right of the page
-to see your change.
+If you change the code while it's running, click **Rerun** at the top right of the page.
 
-## 6. Other scripts (optional)
-
-Still in the VS Code terminal, run these one at a time:
+## 6. Connect the ultrasonic sensor (bench test)
 
 ```
-python make_basins.py
-python simulate.py pilot
-python plot_compare.py pilot
+[sensor] -> [Arduino] --USB--> sensor_bridge.py -> data/live_readings.csv -> dashboard
 ```
 
-A plot window should open, comparing a clean basin with a clogging one.
-Close the window to get your terminal back. The plot is also saved in `output\figures\`.
+1. Wire the sensor: VCC → 5V, GND → GND, Trig → pin 13, Echo → pin 12.
+2. In the **Arduino IDE**, open `arduino\drainshield_sensor\drainshield_sensor.ino`, pick your board and
+   port (**Tools** menu) and click **Upload**. Open the Serial Monitor at **9600 baud** to check you see
+   lines like `DIST,123.4,5`, then **close the Serial Monitor** (only one program can use the port).
+3. Keep the dashboard running in the first terminal. Open a **second terminal** in VS Code
+   (the **+** at the top right of the terminal panel) and type:
+   ```
+   python sensor_bridge.py
+   ```
+   It lists the ports, e.g. `COM3  USB-SERIAL CH340`. Then start recording:
+   ```
+   python sensor_bridge.py COM3 --basin TEST-01
+   ```
+   Each reading is printed in the terminal. Stop with **Ctrl+C**.
+4. In the dashboard, open **Live sensor** and turn on **Auto-refresh** in the sidebar. The readings
+   appear within a few seconds.
+5. **Change the frequency** with the *Data collection frequency* buttons (1 s for bench tests, 15 min
+   in the field). The bridge sends it to the Arduino within ~2 s and the *Firmware* tile shows
+   "device confirms 1 s interval".
 
-Try the town network too:
+**Bench test ideas:** hold a board at 30, 50, 100, 150 cm (tape measure) and compare; check the
+closest distance it can read (the blind zone); point it down a bucket of water; check the noise tile
+(under 1 cm on a still target is good).
 
-```
-python simulate.py town
-python plot_compare.py town
-```
+**When it goes into a real basin:** use **Add basin** with the same ID you give `--basin`
+(e.g. pick the city's catch basin, ID `DOR-12345`), then run
+`python sensor_bridge.py COM3 --basin DOR-12345`. The **Basin** page then shows the water depth below the street.
+
+## 7. Share the project with your team
+
+- **To work on it together:** on github.com, open the repo → **Settings → Collaborators → Add people**
+  and invite each teammate by GitHub username. They accept the email, then in GitHub Desktop:
+  **File → Clone repository** → `drainshield`, and do steps 1, 2 and 4 on their computer.
+  The link to send them is `https://github.com/<your-username>/drainshield`.
+- **To let them watch the live dashboard during a test:** on the same Wi-Fi, open the **Network URL**
+  that Streamlit printed when it started (e.g. `http://192.168.1.23:8501`) on their phone or laptop.
+  (University Wi-Fi sometimes blocks this; a phone hotspot works.) If Windows asks about the firewall, click **Allow**.
+- Commit `data/monitored_basins.csv`, `data/live_readings.csv` and `data/maintenance_log.csv` after a test
+  so the team gets the data too.
 
 ---
 
@@ -130,7 +144,7 @@ Every time you work on the project:
 2. **Work** in VS Code: change code, run it, check that it works.
 3. **Commit.** In GitHub Desktop, look at the changes on the left (green = added lines,
    red = removed lines). Write a short summary of *what* you did, e.g.
-   `Make storms more frequent in simulator`, then click **Commit to main**.
+   `Add bench test readings`, then click **Commit to main**.
    Commit often: a few small commits are better than one huge one.
 4. **Push.** Click **Push origin** so your commits go up to GitHub for the team.
 
@@ -146,7 +160,11 @@ main version. We'll use them once two people are editing code at the same time.
 |---|---|
 | `python` opens the Microsoft Store | Use `py` instead, or reinstall Python with "Add to PATH" ticked |
 | `ModuleNotFoundError: No module named 'pandas'` | Run the `pip install` command from step 4 again |
-| `Can't find data/basins_pilot.csv` | Run `python make_basins.py` first, and make sure the terminal is in the `drainshield` folder |
-| The terminal seems frozen after the plot | Close the plot window |
+| `can't open file ... app.py` | The terminal isn't in the project folder: `cd Documents\GitHub\drainshield` |
+| `No module named 'serial'` | `python -m pip install pyserial` |
+| `PermissionError` / `Access is denied` on COM3 | Close the Arduino IDE's Serial Monitor (or anything else using the port) |
+| `python sensor_bridge.py` lists no port | Try another USB cable (some only charge) or install the CH340 driver for clone boards |
+| Readings are always "no echo" | Check the wiring (Trig 13, Echo 12, 5 V) and that nothing is closer than ~25 cm |
+| Garbage characters | Baud rate mismatch: the sketch and the bridge both use 9600 |
 | `streamlit` is not recognized | Use `python -m streamlit run app.py` |
 | The dashboard looks the same after I changed the code | Click **Rerun** (top right of the page), or stop with Ctrl+C and start again |

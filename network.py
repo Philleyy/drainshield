@@ -1,17 +1,17 @@
 """
 network.py: the overview (home screen)
 --------------------------------------
-* Weather readiness banner: rain expected in the next 12 h, and which basins must be
-  cleaned BEFORE it starts.
-* Four filter counters: 🔴 Urgent · 🟠 Inspect · 🟢 Normal · ⚪ Offline (sensor problem).
-* Map of the monitored basins, plus the municipality's unmonitored catch basins (grey dots,
-  from the Ville de Montréal open data). Click a pin or search a basin to see its card.
-* Dispatch list, most urgent first. Click a row to open the basin.
+* Every catch basin of the municipality (Ville de Montréal open data): grey dots = no sensor yet.
+* Basins with a DrainShield sensor are coloured by what to do:
+      🔴 Urgent · 🟠 Inspect · 🟢 Normal · ⚫ Offline (sensor problem)
+  The pills at the top filter the map and the list.
+* Weather readiness banner: real rain forecast for the next 12 h (Environment Canada GEM),
+  and which monitored basins must be cleaned BEFORE it starts.
+* Click a pin or search a basin to see its card. Click a dispatch-list row to open the basin.
 """
 
 import math
 
-import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -21,31 +21,27 @@ import ui
 import weather
 
 ui.inject_css()
-basins, readings, rain, events, truth = data_store.load_all()
-now = pd.Timestamp(st.session_state["now"])
+basins, readings, rain, events, _ = data_store.load_all()
+now = data_store.now()
 df = data_store.network_status(data_store.data_key(), data_store.log_key(), now)
-forecast = weather.simulated_forecast(rain, now)
+forecast = weather.forecast_from_series(rain, now)
 cats = data_store.CATEGORIES
 eng = data_store.engineering()
 
-muni = data_store.municipal_basins()
+registry = data_store.municipal_basins()
 attached = set(basins["municipal_id"].dropna().astype(str)) if "municipal_id" in basins else set()
-muni = muni[~muni["municipal_id"].isin(attached)]
+unmonitored = registry[~registry["municipal_id"].isin(attached)]
+owner = registry["owner"].iloc[0] if "owner" in registry and not registry.empty else "the municipality"
 
 with st.sidebar:
     st.divider()
-    groups = st.multiselect("Basins to show", list(data_store.NETWORK_NAMES.values()),
-                            default=[n for n in data_store.NETWORK_NAMES.values() if n in set(df["network"])])
     st.markdown("**Map layers**")
     street_map = st.toggle("Street map", value=True, help="Needs internet. Turn off if the map stays blank.")
-    show_muni = st.toggle(f"Unmonitored municipal basins ({len(muni)})", value=True,
-                          help="Ville de Montréal open data (Puisards d'égout). Click one to attach a sensor.")
-    radar = st.toggle("Live ECCC weather radar", value=False,
-                      help="Environment Canada 1 km radar, real weather right now (not the demo replay time).")
-df = df[df["network"].isin(groups)]
+    radar = st.toggle("Live ECCC weather radar", value=False, help="Environment Canada 1 km precipitation radar.")
 
-st.title("Network overview")
-st.caption(f"What every sensor tells us on **{now:%b %d, %Y at %H:%M}** (simulated sensor data).")
+st.title(f"{owner.replace('Dorval - Ile Dorval', 'Dorval')} catch basins")
+st.caption(f"{len(registry):,} catch basins from the Ville de Montréal open data · "
+           f"{len(df)} with a DrainShield sensor · {now:%b %d, %Y %H:%M}")
 
 # ---------------------------------------------------------------------------
 # WEATHER READINESS BANNER
@@ -53,29 +49,27 @@ st.caption(f"What every sensor tells us on **{now:%b %d, %Y at %H:%M}** (simulat
 before_storm = df[df["priority"] == "Inspect before storm"]
 flooding = df[df["priority"] == "Flooding / backing up now"]
 inspect = df[df["category"] == "Inspect"]
-if not flooding.empty:
+if df.empty:
+    key, call = "no_data", "No sensor installed yet: attach one from the map or the Add basin page."
+elif not flooding.empty:
     key, call = "urgent", f"{len(flooding)} catch basin(s) backing up right now: dispatch crews."
 elif not before_storm.empty:
     key, call = "urgent", (f"⚠️ {len(before_storm)} catch basin(s) with slow drainage need cleaning "
                            f"before the rain starts: {', '.join(before_storm['basin_id'])}.")
 elif weather.is_heavy(forecast):
-    key, call = "rising", "Heavy rain coming, and no basin is flagged for slow drainage."
+    key, call = "rising", "Heavy rain coming, and no monitored basin is flagged for slow drainage."
 elif not inspect.empty:
-    key, call = "clean_soon", f"{len(inspect)} catch basin(s) to add to the next vacuum route (no heavy rain expected)."
+    key, call = "clean_soon", f"{len(inspect)} catch basin(s) to add to the next vacuum route."
 else:
     key, call = "ok", "Network ready: no action needed."
-st.html(ui.card(key, "🌧" if forecast["total_mm"] >= 0.5 else "☀", "Weather readiness",
+wet = forecast is not None and forecast["total_mm"] >= 0.5
+st.html(ui.card(key, "🌧" if wet else "☀", "Weather readiness · Environment Canada GEM forecast",
                 weather.describe(forecast), [(key, call)]))
-with st.expander("Real forecast right now (Environment Canada GEM, via Open-Meteo)"):
-    live = weather.live_forecast(round(basins["latitude"].mean(), 3), round(basins["longitude"].mean(), 3))
-    st.write(weather.describe(live) if live else "Unavailable (no internet connection?).")
-    st.caption("The demo banner above uses the simulated rain as its forecast. When real sensors are connected, "
-               "this live forecast replaces it.")
 
 # ---------------------------------------------------------------------------
 # SENSOR HEALTH (engineering view)
 # ---------------------------------------------------------------------------
-if eng:
+if eng and not df.empty:
     low = df[(df["battery_pct"].notna()) & (df["battery_pct"] < 15) & df["online"]]
     c = st.columns(4)
     c[0].html(ui.tile("Sensors online", f"{int(df['online'].sum())}", f"of {len(df)}", "ok"))
@@ -84,12 +78,14 @@ if eng:
     c[3].html(ui.tile("Data irregularities", "0", "not detected (rule not built yet)", "neutral"))
 
 # ---------------------------------------------------------------------------
-# FILTER COUNTERS
+# FILTER PILLS
 # ---------------------------------------------------------------------------
 labels = {c: f"{s['emoji']} {int((df['category'] == c).sum())} {c}" for c, s in cats.items()}
-chosen = st.pills("Filter", list(cats), selection_mode="multi", default=list(cats),
-                  format_func=lambda c: labels[c], label_visibility="collapsed", key="filter")
-shown = df[df["category"].isin(chosen or list(cats))].copy()
+labels["No sensor"] = f"⚪ {len(unmonitored):,} No sensor"
+chosen = st.pills("Filter", list(labels), selection_mode="multi", default=list(labels),
+                  format_func=lambda c: labels[c], label_visibility="collapsed", key="filter") or list(labels)
+shown = df[df["category"].isin(chosen)].copy()
+show_grey = "No sensor" in chosen
 
 # ---------------------------------------------------------------------------
 # SEARCH + MAP + SELECTED BASIN CARD
@@ -102,60 +98,66 @@ def pick_from_map():
 
 
 def pick_from_search():
-    if st.session_state.get("search"):
-        st.session_state["picked"] = ("basin", st.session_state["search"])
+    choice = st.session_state.get("search")
+    if choice:
+        kind, ident = choice.split(":", 1)
+        st.session_state["picked"] = ("basin" if kind == "b" else "muni", ident)
 
 
-addresses = dict(zip(df["basin_id"], df["address"]))
-st.selectbox("Find a basin", list(df["basin_id"]), index=None, key="search", on_change=pick_from_search,
-             placeholder="🔍 Search by basin ID or street...", label_visibility="collapsed",
-             format_func=lambda b: f"{b} · {addresses.get(b, '')}")
+search_labels = {f"b:{r['basin_id']}": f"🛰 {r['basin_id']} · {r['address']}" for _, r in df.iterrows()}
+search_labels.update({f"m:{m}": f"#{m} · {a}" for m, a in zip(unmonitored["municipal_id"], unmonitored["address"])})
+st.selectbox("Find a basin", list(search_labels), index=None, key="search", on_change=pick_from_search,
+             placeholder="🔍 Search by basin ID, city catch basin number or street...",
+             label_visibility="collapsed", format_func=lambda k: search_labels[k])
 
 map_col, card_col = st.columns([1.75, 1], gap="medium")
 picked = st.session_state.get("picked")
 with map_col:
-    shown["size"] = shown["category"].map(lambda c: cats[c]["size"])
-    shown["kind"] = "basin"
-    pts = df            # fit the view on the monitored basins (the grey ones are all over the city)
+    pts = df if not df.empty else registry
     center = {"lat": (pts["latitude"].min() + pts["latitude"].max()) / 2,
               "lon": (pts["longitude"].min() + pts["longitude"].max()) / 2}
     span = max(pts["longitude"].max() - pts["longitude"].min(),
-               (pts["latitude"].max() - pts["latitude"].min()) * 1.6, 0.002)
-    zoom = min(16.0, math.log2(360 * 2.2 / span) - 0.3)        # fit every basin on screen
+               (pts["latitude"].max() - pts["latitude"].min()) * 1.6, 0.004)
+    zoom = min(16.0, math.log2(360 * 2.2 / span) - 0.3)
     if picked:
-        src = df[df["basin_id"] == picked[1]] if picked[0] == "basin" else muni[muni["municipal_id"] == picked[1]]
+        src = df[df["basin_id"] == picked[1]] if picked[0] == "basin" else registry[registry["municipal_id"] == picked[1]]
         if not src.empty:
-            center, zoom = {"lat": src["latitude"].iloc[0], "lon": src["longitude"].iloc[0]}, 16.5
-    fig = px.scatter_map(
-        shown, lat="latitude", lon="longitude", color="category", size="size", size_max=22,
-        color_discrete_map={c: s["color"] for c, s in cats.items()},
-        category_orders={"category": list(cats)[::-1]},
-        hover_name="basin_id", custom_data=["basin_id", "kind"],
-        hover_data={"address": True, "priority": True, "water": True, "size": False, "kind": False,
-                    "latitude": False, "longitude": False, "category": False},
-        labels={"address": "Address", "priority": "Status", "water": "Water below street"},
-        zoom=zoom, center=center, map_style="carto-positron" if street_map else "white-bg", height=540)
-    if show_muni and not muni.empty:
+            center, zoom = {"lat": src["latitude"].iloc[0], "lon": src["longitude"].iloc[0]}, 17.0
+    fig = go.Figure()
+    if show_grey and not unmonitored.empty:
         fig.add_trace(go.Scattermap(
-            lat=muni["latitude"], lon=muni["longitude"], mode="markers", name="Unmonitored",
-            marker=dict(size=6, color="#a9a8a2", opacity=0.75),
-            customdata=list(zip(muni["municipal_id"], ["muni"] * len(muni))),
-            text=muni["address"], hovertemplate="Unmonitored catch basin %{customdata[0]}<br>%{text}<extra></extra>"))
-        fig.data = (fig.data[-1],) + fig.data[:-1]          # grey dots underneath
+            lat=unmonitored["latitude"], lon=unmonitored["longitude"], mode="markers", name="No sensor",
+            marker=dict(size=6, color="#a9a8a2", opacity=0.8),
+            customdata=list(zip(unmonitored["municipal_id"], ["muni"] * len(unmonitored))),
+            text=unmonitored["address"], hovertemplate="Catch basin #%{customdata[0]}<br>%{text}<br>No sensor<extra></extra>"))
+    if not shown.empty:
+        shown["size"] = shown["category"].map(lambda c: cats[c]["size"])
+        shown["kind"] = "basin"
+        sensors = px.scatter_map(
+            shown, lat="latitude", lon="longitude", color="category", size="size", size_max=22,
+            color_discrete_map={c: s["color"] for c, s in cats.items()},
+            category_orders={"category": list(cats)[::-1]}, hover_name="basin_id", custom_data=["basin_id", "kind"],
+            hover_data={"address": True, "priority": True, "water": True, "size": False, "kind": False,
+                        "latitude": False, "longitude": False, "category": False},
+            labels={"address": "Address", "priority": "Status", "water": "Water below street"})
+        for trace in sensors.data:
+            fig.add_trace(trace)
     if picked:
-        src = shown[shown["basin_id"] == picked[1]] if picked[0] == "basin" else muni[muni["municipal_id"] == picked[1]]
+        src = df[df["basin_id"] == picked[1]] if picked[0] == "basin" else registry[registry["municipal_id"] == picked[1]]
         if not src.empty:
             fig.add_trace(go.Scattermap(lat=src["latitude"], lon=src["longitude"], mode="markers", hoverinfo="skip",
                                         marker=dict(size=34, color="#0b2d5b", opacity=0.25), showlegend=False))
     layers = [{"sourcetype": "raster", "source": [weather.RADAR_TILES], "opacity": 0.55, "below": "traces"}] if radar else []
-    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), showlegend=False, map_layers=layers)
+    fig.update_layout(map=dict(style="carto-positron" if street_map else "white-bg", center=center, zoom=zoom,
+                               layers=layers),
+                      margin=dict(l=0, r=0, t=0, b=0), showlegend=False, height=560)
     st.plotly_chart(fig, width="stretch", on_select=pick_from_map, selection_mode="points", key="map")
 
 with card_col:
     if not picked:
-        st.markdown("**Click a pin, or search a basin.**")
-        st.caption("Grey dots are the municipality's catch basins without a sensor yet.")
-        top = df[df["category"].isin(["Urgent", "Inspect"])].head(6)
+        st.markdown("**Click a dot, or search a basin.**")
+        st.caption("Grey dots: catch basins without a sensor yet. Click one to attach a sensor.")
+        top = df[df["category"].isin(["Urgent", "Inspect", "Offline"])].head(6)
         if not top.empty:
             st.markdown("**Needs attention**")
             st.html('<table class="fs-table">' + "".join(
@@ -166,8 +168,7 @@ with card_col:
         r = df[df["basin_id"] == picked[1]].iloc[0]
         ck = {"Urgent": "urgent", "Inspect": "clean_soon", "Normal": "ok", "Offline": "no_data"}[r["category"]]
         st.html(ui.dispatch_card(ck, {"Urgent": "!", "Inspect": "!", "Normal": "✔", "Offline": "?"}[r["category"]],
-                                 r["address"] or "Monitored basin",
-                                 f"{r['basin_id']} · {r['priority']}",
+                                 r["address"] or "Monitored basin", f"{r['basin_id']} · {r['priority']}",
                                  [("Water", f"{r['water']} below street {r['trend']}"),
                                   ("Drainage", r["drainage"]), ("Action", r["action"]),
                                   ("Issue", r["issue"] or "—"), ("Updated", r["updated"])]))
@@ -175,14 +176,14 @@ with card_col:
             data_store.select_basin(r["basin_id"])
             st.switch_page("dashboard.py")
     else:
-        m = muni[muni["municipal_id"] == picked[1]]
+        m = registry[registry["municipal_id"] == picked[1]]
         if not m.empty:
             m = m.iloc[0]
-            st.html(ui.dispatch_card("no_data", "+", "Unmonitored municipal catch basin", f"#{m['municipal_id']}",
+            installed = m.get("install_date") if isinstance(m.get("install_date"), str) and m.get("install_date") \
+                else "unknown"
+            st.html(ui.dispatch_card("no_data", "+", "City catch basin · no sensor", f"#{m['municipal_id']}",
                                      [("Address", m["address"]), ("Type", m.get("basin_type", "")),
-                                      ("Installed", m.get("install_date") if isinstance(m.get("install_date"), str)
-                                       and m.get("install_date") else "unknown"),
-                                      ("Owner", m.get("owner", ""))]))
+                                      ("Installed", installed), ("Owner", m.get("owner", ""))]))
             if st.button("+ Attach a DrainShield sensor to this basin", type="primary", width="stretch"):
                 st.session_state["prefill"] = {"municipal_id": m["municipal_id"], "address": m["address"],
                                                "latitude": float(m["latitude"]), "longitude": float(m["longitude"])}
@@ -192,19 +193,35 @@ with card_col:
         st.rerun()
 
 # ---------------------------------------------------------------------------
-# DISPATCH LIST
+# DISPATCH LIST (basins with a sensor)
 # ---------------------------------------------------------------------------
 st.subheader("Dispatch list")
-st.caption("Most urgent first. Click a row to open the basin.")
-cols = {"basin_id": "Basin", "address": "Address", "status": "Priority", "water": "Water below street",
-        "trend": "Trend", "recovery": "Recovery time", "action": "Recommended action", "issue": "Issue",
-        "updated": "Updated"}
-if eng:
-    cols.update({"battery_pct": "Battery %", "network": "Group"})
-table = shown.assign(status=shown["category"].map(lambda c: cats[c]["emoji"]) + " " + shown["priority"])
-table = table[list(cols)].rename(columns=cols)
-picked_row = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun",
-                          selection_mode="single-row", key="dispatch")
-if picked_row.selection.rows:
-    data_store.select_basin(table.iloc[picked_row.selection.rows[0]]["Basin"])
-    st.switch_page("dashboard.py")
+if df.empty:
+    st.info("No sensor installed yet. Click a grey dot on the map (or use **Add basin**) to attach one, then "
+            "start `sensor_bridge.py` with the same basin ID (see the **Live sensor** page).")
+else:
+    st.caption("Most urgent first. Click a row to open the basin.")
+    cols = {"basin_id": "Basin", "address": "Address", "status": "Priority", "water": "Water below street",
+            "trend": "Trend", "recovery": "Recovery time", "action": "Recommended action", "issue": "Issue",
+            "updated": "Updated"}
+    if eng:
+        cols["battery_pct"] = "Battery %"
+    table = shown.assign(status=shown["category"].map(lambda c: cats[c]["emoji"]) + " " + shown["priority"])
+    table = table[list(cols)].rename(columns=cols)
+    picked_row = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun",
+                              selection_mode="single-row", key="dispatch")
+    if picked_row.selection.rows:
+        data_store.select_basin(table.iloc[picked_row.selection.rows[0]]["Basin"])
+        st.switch_page("dashboard.py")
+
+# ---------------------------------------------------------------------------
+# THE FULL CITY REGISTRY
+# ---------------------------------------------------------------------------
+with st.expander(f"All {len(registry):,} catch basins (Ville de Montréal open data)"):
+    full = registry.assign(sensor=registry["municipal_id"].isin(attached).map({True: "yes", False: ""}))
+    st.dataframe(full[["municipal_id", "address", "basin_type", "install_date", "sensor", "latitude", "longitude"]]
+                 .rename(columns={"municipal_id": "City #", "address": "Address", "basin_type": "Type",
+                                  "install_date": "Installed", "sensor": "Sensor"}),
+                 hide_index=True, width="stretch", height=360)
+    st.caption("Source: Ville de Montréal, « Puisards d'égout » (ego_puisard_p.csv), every active basin owned by "
+               f"{owner}. Use the search icon at the top right of the table to find a street.")

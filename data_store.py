@@ -1,11 +1,20 @@
 """
 data_store.py
 -------------
-Loads all the data the dashboard needs (demo basins, the simulated town, and the
-basins you added), re-runs the simulator automatically when a basin file changes,
-and keeps the "current moment" and the selected basin shared between pages.
+Loads everything the dashboard needs and keeps the selected basin shared between pages.
+
+    data/municipal_basins.csv   every catch basin of the municipality (Ville de Montréal open data)
+    data/monitored_basins.csv   the basins that have a DrainShield sensor, with their as-built geometry
+    data/live_readings.csv      what the sensors sent (written by sensor_bridge.py)
+    data/sensor_settings.json   reading interval chosen in the dashboard (read by sensor_bridge.py)
+    data/sensor_status.json     what the bridge last heard from each sensor
+    data/maintenance_log.csv    the crews' maintenance log
+
+Rain comes from the real Environment Canada GEM model (past 7 days + forecast) through
+Open-Meteo. Without internet, the rain-based features simply switch off.
 """
 
+import json
 import os
 
 import pandas as pd
@@ -13,98 +22,83 @@ import streamlit as st
 
 import maintenance
 import processing as proc
-import simulate
 import weather
 
-DATA, OUT = "data", "output"
-USER_FILE = os.path.join(DATA, "basins_user.csv")
-NETWORKS = ["demo", "town", "user"]
-NETWORK_NAMES = {"demo": "Demo", "town": "Simulated town", "user": "Yours"}
+DATA = "data"
+REGISTRY_FILE = os.path.join(DATA, "municipal_basins.csv")
+MONITORED_FILE = os.path.join(DATA, "monitored_basins.csv")
+OLD_USER_FILE = os.path.join(DATA, "basins_user.csv")          # name used by earlier versions
+LIVE_FILE = os.path.join(DATA, "live_readings.csv")
+SETTINGS_FILE = os.path.join(DATA, "sensor_settings.json")
+STATUS_FILE = os.path.join(DATA, "sensor_status.json")
+READING_COLUMNS = ["basin_id", "timestamp", "distance_cm", "battery_v"]
+DEFAULT_INTERVAL_S = 5
 
 
 def _mtime(path):
     return os.path.getmtime(path) if os.path.exists(path) else 0
 
 
-def _needs_simulation(network):
-    basins_file = os.path.join(DATA, f"basins_{network}.csv")
-    readings_file = os.path.join(OUT, f"readings_{network}.csv")
-    truth_file = os.path.join(OUT, f"truth_{network}.csv")
-    if not os.path.exists(basins_file):
-        return False
-    if not os.path.exists(readings_file) or not os.path.exists(truth_file):
-        return True
-    if _mtime(readings_file) < _mtime(basins_file):
-        return True
-    basins = pd.read_csv(basins_file)
-    if "sensor_id" not in basins.columns:                # file from an older version
-        return True
-    ids = set(basins["basin_id"])
-    return not ids <= set(pd.read_csv(readings_file, usecols=["basin_id"])["basin_id"])
-
-
-def ensure_data():
-    demo = os.path.join(DATA, "basins_demo.csv")
-    muni_file = os.path.join(DATA, "municipal_basins.csv")
-    stale = not os.path.exists(demo) or "sensor_id" not in pd.read_csv(demo, nrows=1).columns
-    if not stale and os.path.exists(muni_file):     # demo basins must sit on the current city's basins
-        demo_ids = set(pd.read_csv(demo, dtype={"municipal_id": str})["municipal_id"].dropna())
-        stale = not demo_ids <= set(pd.read_csv(muni_file, dtype={"municipal_id": str})["municipal_id"])
-    if stale:
-        import random
-        import make_basins
-        os.makedirs(DATA, exist_ok=True)
-        rng = random.Random(make_basins.SEED)
-        make_basins.save(make_basins.make_demo(), "demo")
-        make_basins.save(make_basins.make_pilot(rng), "pilot")
-        make_basins.save(make_basins.make_town(rng), "town")
-    for network in NETWORKS:
-        if _needs_simulation(network):
-            simulate.run_network(network, verbose=False)
+def now():
+    """The current local time (the dashboard is live: no more replay)."""
+    return pd.Timestamp.now().floor("s")
 
 
 def data_key():
-    """Changes whenever a basin file or a readings file changes (used to refresh caches)."""
-    return tuple(_mtime(os.path.join(folder, f"{kind}_{n}.csv"))
-                 for n in NETWORKS for folder, kind in [(DATA, "basins"), (OUT, "readings")])
+    """Changes whenever a basin file or the readings change (used to refresh caches)."""
+    return (_mtime(MONITORED_FILE), _mtime(LIVE_FILE), _mtime(REGISTRY_FILE))
 
 
-@st.cache_data(show_spinner="Loading data...")
+@st.cache_data(show_spinner=False)
 def _load(key):
-    basins, readings, truth = [], [], []
-    for network in NETWORKS:
-        bf = os.path.join(DATA, f"basins_{network}.csv")
-        if not os.path.exists(bf):
-            continue
-        b = pd.read_csv(bf)
-        if b.empty:
-            continue
-        b["network"] = network
-        basins.append(b)
-        readings.append(pd.read_csv(os.path.join(OUT, f"readings_{network}.csv"), parse_dates=["timestamp"]))
-        tf = os.path.join(OUT, f"truth_{network}.csv")
-        if os.path.exists(tf) and os.path.getsize(tf) > 5:
-            truth.append(pd.read_csv(tf, parse_dates=["date"]))
-    rain = pd.read_csv(os.path.join(OUT, "rain_demo.csv"), parse_dates=["timestamp"])
-    return (pd.concat(basins, ignore_index=True), pd.concat(readings, ignore_index=True), rain,
-            proc.rain_events(rain), pd.concat(truth, ignore_index=True) if truth else pd.DataFrame())
+    if not os.path.exists(MONITORED_FILE) and os.path.exists(OLD_USER_FILE):
+        os.replace(OLD_USER_FILE, MONITORED_FILE)                     # carry over basins added before
+    basins = pd.read_csv(MONITORED_FILE, dtype={"municipal_id": str}) if os.path.exists(MONITORED_FILE) \
+        else pd.DataFrame(columns=["basin_id", "municipal_id", "latitude", "longitude"])
+    readings = (pd.read_csv(LIVE_FILE, parse_dates=["timestamp"]) if os.path.exists(LIVE_FILE)
+                else pd.DataFrame(columns=READING_COLUMNS))
+    readings["timestamp"] = pd.to_datetime(readings["timestamp"])
+    readings["distance_cm"] = pd.to_numeric(readings["distance_cm"], errors="coerce")
+    readings["battery_v"] = pd.to_numeric(readings["battery_v"], errors="coerce")
+    return basins, readings
 
 
 def load_all():
-    ensure_data()
-    return _load(data_key())
+    """(monitored basins, sensor readings, rain, rain events, truth) — truth is always empty now."""
+    basins, readings = _load(data_key())
+    lat, lon = center()
+    rain = weather.rain_series(round(lat, 3), round(lon, 3))
+    return basins, readings, rain, proc.rain_events(rain), pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def municipal_basins():
+    """Every catch basin of the municipality (Ville de Montréal open data)."""
+    if not os.path.exists(REGISTRY_FILE):
+        return pd.DataFrame(columns=["municipal_id", "address", "latitude", "longitude", "basin_type"])
+    return pd.read_csv(REGISTRY_FILE, dtype={"municipal_id": str})
+
+
+def center():
+    reg = municipal_basins()
+    if reg.empty:
+        return 45.4440, -73.7520
+    return float(reg["latitude"].median()), float(reg["longitude"].median())
 
 
 def basin_row(basins, basin_id):
     return basins[basins["basin_id"] == basin_id].iloc[0]
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def levels_for(key, basin_id):
-    basins, readings, *_ = load_all()
-    return proc.water_levels(readings, basin_row(basins, basin_id))
+    basins, readings = _load(key)
+    return proc.water_levels(readings.dropna(subset=["distance_cm"]), basin_row(basins, basin_id))
 
 
+# ---------------------------------------------------------------------------
+# Maintenance log and status
+# ---------------------------------------------------------------------------
 def log_key():
     return _mtime(maintenance.LOG_FILE)
 
@@ -114,43 +108,34 @@ def _log(key):
     return maintenance.load()
 
 
-def entries_for(basin_id, now):
-    return maintenance.for_basin(_log(log_key()), basin_id, now)
+def entries_for(basin_id, when):
+    return maintenance.for_basin(_log(log_key()), basin_id, when)
 
 
-def status_for(key, basin_id, now):
-    """Status of one basin at `now`, taking the crew's maintenance log into account."""
+def status_for(key, basin_id, when):
+    """Status of one monitored basin at `when`, taking the maintenance log into account."""
     basins, _, rain, events, _ = load_all()
     basin = basin_row(basins, basin_id)
-    entries = entries_for(basin_id, now)
-    S = proc.basin_status(basin, levels_for(key, basin_id), events, rain, now,
+    entries = entries_for(basin_id, when)
+    S = proc.basin_status(basin, levels_for(key, basin_id), events, rain, when,
                           reset=maintenance.last_reset(entries))
     S["lifecycle"] = maintenance.lifecycle(S, entries)
     S["entries"] = entries
     return S
 
 
-@st.cache_data(show_spinner=False)
-def municipal_basins():
-    """Unmonitored municipal catch basins (Ville de Montréal open data slice), or an empty table."""
-    path = os.path.join(DATA, "municipal_basins.csv")
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=["municipal_id", "address", "latitude", "longitude", "basin_type"])
-    return pd.read_csv(path, dtype={"municipal_id": str})
-
-
 # Map / dispatch-list categories, most urgent first.
 # Infrastructure state (red/orange/green) is kept separate from sensor state (grey).
 CATEGORIES = {
     "Urgent": {"color": "#d03b3b", "size": 22, "rank": 0, "emoji": "🔴", "tint": "#f9e3e3", "text": "#b52a2a"},
-    "Inspect": {"color": "#ec835a", "size": 15, "rank": 1, "emoji": "🟠", "tint": "#fcebe3", "text": "#b4471c"},
-    "Normal": {"color": "#0ca30c", "size": 10, "rank": 2, "emoji": "🟢", "tint": "#e9f6e9", "text": "#0a7a0a"},
-    "Offline": {"color": "#8a8984", "size": 12, "rank": 3, "emoji": "⚪", "tint": "#efefec", "text": "#52514e"},
+    "Inspect": {"color": "#ec835a", "size": 16, "rank": 1, "emoji": "🟠", "tint": "#fcebe3", "text": "#b4471c"},
+    "Normal": {"color": "#0ca30c", "size": 13, "rank": 2, "emoji": "🟢", "tint": "#e9f6e9", "text": "#0a7a0a"},
+    "Offline": {"color": "#55534e", "size": 13, "rank": 3, "emoji": "⚫", "tint": "#efefec", "text": "#52514e"},
 }
 
 
 def triage(b, S, forecast):
-    """(category, priority label, recommended action) for one basin."""
+    """(category, priority label, recommended action) for one monitored basin."""
     live = proc.live_summary(b, S)
     _, _, _, action = proc.drainage_health(b, S)
     if S["live"] == "no_data" or S["status"] == "no_data":
@@ -165,14 +150,13 @@ def triage(b, S, forecast):
     return "Normal", "Normal", "No action"
 
 
-@st.cache_data(show_spinner="Checking every basin...")
-def network_status(key, lkey, now):
-    """One row per basin: what the map and the dispatch list need."""
+def network_status(key, lkey, when):
+    """One row per MONITORED basin: what the map and the dispatch list need."""
     basins, _, rain, *_ = load_all()
-    forecast = weather.simulated_forecast(rain, now)
+    forecast = weather.forecast_from_series(rain, when)
     rows = []
     for _, b in basins.iterrows():
-        S = status_for(key, b["basin_id"], now)
+        S = status_for(key, b["basin_id"], when)
         cat, priority, action = triage(b, S, forecast)
         health, detail, *_ = proc.drainage_health(b, S)
         depth = (None if S["level_cm"] is None or S["live"] == "no_data"
@@ -181,23 +165,37 @@ def network_status(key, lkey, now):
         recovery = ("" if not w or pd.isna(w.get("drain_min")) else
                     "< 10 min" if w["drain_min"] < 10 else f"{proc.nice_duration(w['drain_min'])} (normal < 10 min)")
         rows.append({
-            "basin_id": b["basin_id"], "network": NETWORK_NAMES[b["network"]],
+            "basin_id": b["basin_id"], "municipal_id": b.get("municipal_id"),
             "address": b.get("address", "") if isinstance(b.get("address", ""), str) else "",
             "latitude": b["latitude"], "longitude": b["longitude"], "category": cat, "priority": priority,
             "rank": CATEGORIES[cat]["rank"] * 10 + (0 if priority == "Flooding / backing up now" else 1)
                     + {"urgent": 0, "clean_soon": 1, "watch": 2}.get(S["status"], 3) / 10,
-            "live": proc.live_summary(b, S)["title"],
+            "live": live_title(b, S),
             "water": ("—" if depth is None else
                       f"≤ {proc.closest_readable_m(b):.2f} m" if S["at_sensor_limit"] else f"{depth:.2f} m"),
             "trend": S.get("trend", ""), "recovery": recovery,
             "drainage": f"{health} ({detail})", "action": action, "issue": S.get("lifecycle") or "",
-            "updated": ("—" if S["minutes_since_reading"] is None else
-                        "just now" if S["minutes_since_reading"] < 1 else
-                        f"{proc.nice_duration(S['minutes_since_reading'])} ago"),
+            "updated": ago(S["minutes_since_reading"]),
             "online": S["live"] != "no_data",
             "battery_pct": proc.battery_pct(S["battery_v"]),
         })
+    cols = ["basin_id", "municipal_id", "address", "latitude", "longitude", "category", "priority", "rank",
+            "live", "water", "trend", "recovery", "drainage", "action", "issue", "updated", "online", "battery_pct"]
+    if not rows:
+        return pd.DataFrame(columns=cols)
     return pd.DataFrame(rows).sort_values(["rank", "basin_id"]).reset_index(drop=True)
+
+
+def live_title(b, S):
+    return proc.live_summary(b, S)["title"]
+
+
+def ago(minutes):
+    if minutes is None or pd.isna(minutes):
+        return "—"
+    if minutes < 1:
+        return f"{max(int(minutes * 60), 0)} s ago"
+    return f"{proc.nice_duration(minutes)} ago"
 
 
 def engineering():
@@ -209,23 +207,55 @@ def select_basin(basin_id):
     st.session_state["basin_id"] = basin_id
 
 
-def save_user_basin(row, replace=False):
-    """Add (or replace) one basin in data/basins_user.csv, then re-simulate the user network."""
+# ---------------------------------------------------------------------------
+# Monitored basins
+# ---------------------------------------------------------------------------
+def save_monitored_basin(row, replace=False):
+    """Add (or replace) one basin in data/monitored_basins.csv."""
     os.makedirs(DATA, exist_ok=True)
-    df = pd.read_csv(USER_FILE) if os.path.exists(USER_FILE) else pd.DataFrame()
+    df = pd.read_csv(MONITORED_FILE, dtype={"municipal_id": str}) if os.path.exists(MONITORED_FILE) \
+        else pd.DataFrame()
     if not df.empty and row["basin_id"] in set(df["basin_id"]):
         if not replace:
             raise ValueError("exists")
         df = df[df["basin_id"] != row["basin_id"]]
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(USER_FILE, index=False)
-    simulate.run_network("user", verbose=False)
+    df.to_csv(MONITORED_FILE, index=False)
     st.cache_data.clear()
 
 
-def delete_user_basin(basin_id):
-    df = pd.read_csv(USER_FILE)
-    df = df[df["basin_id"] != basin_id]
-    df.to_csv(USER_FILE, index=False)
-    simulate.run_network("user", verbose=False)
+def delete_monitored_basin(basin_id):
+    df = pd.read_csv(MONITORED_FILE, dtype={"municipal_id": str})
+    df[df["basin_id"] != basin_id].to_csv(MONITORED_FILE, index=False)
     st.cache_data.clear()
+
+
+# ---------------------------------------------------------------------------
+# Sensor settings (written here, read by sensor_bridge.py) and status (the other way round)
+# ---------------------------------------------------------------------------
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def sensor_settings():
+    return _read_json(SETTINGS_FILE)
+
+
+def set_interval(sensor_key, seconds):
+    settings = sensor_settings()
+    settings.setdefault(sensor_key, {})["interval_s"] = seconds
+    os.makedirs(DATA, exist_ok=True)
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+
+def interval_for(sensor_key):
+    return sensor_settings().get(sensor_key, {}).get("interval_s", DEFAULT_INTERVAL_S)
+
+
+def sensor_status():
+    return _read_json(STATUS_FILE)

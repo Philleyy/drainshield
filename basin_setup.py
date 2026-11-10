@@ -4,7 +4,8 @@ basin_setup.py: add a catch basin from its as-built plan
 Only asks for what a municipality actually has on its as-built plans (plans tel que
 construit): inside diameter, outlet invert depth and pipe size, sump, other pipes
 coming in, and where our sensor pod was mounted. Saving adds it to
-data/basins_user.csv and generates simulated data for it.
+data/monitored_basins.csv. Its readings then come from the real sensor
+(sensor_bridge.py writes them into data/live_readings.csv under the same basin ID).
 """
 
 import re
@@ -14,15 +15,13 @@ import streamlit as st
 
 import basin_model as bm
 import data_store
-import simulate
 import ui
-from basin_catalog import TRAPS, trap_for_pipe
+from basin_catalog import trap_for_pipe
 from basin_drawing import basin_svg
 
 ui.inject_css()
 basins, *_ = data_store.load_all()
-other_ids = set(basins.loc[basins["network"] != "user", "basin_id"])
-user_ids = set(basins.loc[basins["network"] == "user", "basin_id"])
+user_ids = set(basins["basin_id"])
 cfg = bm.default_config()
 
 # Municipal catch basins (Ville de Montréal open data) that don't have a sensor yet
@@ -38,6 +37,8 @@ def use_municipal():
     if mid:
         row = muni[muni["municipal_id"] == mid].iloc[0]
         st.session_state["lat"], st.session_state["lon"] = float(row["latitude"]), float(row["longitude"])
+        if not st.session_state.get("bid"):
+            st.session_state["bid"] = f"DOR-{mid}"
 
 
 # Coming from "+ Attach a DrainShield sensor" on the map: pre-fill the form
@@ -45,6 +46,7 @@ if "prefill" in st.session_state:
     p = st.session_state.pop("prefill")
     st.session_state["muni_pick"] = p["municipal_id"]
     st.session_state["lat"], st.session_state["lon"] = p["latitude"], p["longitude"]
+    st.session_state.setdefault("bid", f"DOR-{p['municipal_id']}")
 
 st.title("Add a basin")
 st.caption("From the as-built plan (plan tel que construit). Depths are measured down from the street grate. "
@@ -83,19 +85,25 @@ with form:
     sump = st.segmented_control("Sump depth below invert", list(bm.SUMPS), default=300, key="sump",
                                 format_func=lambda s: bm.SUMPS[s])
     cfg["sump_mm"] = 300 if sump is None else sump      # (0 mm is a valid choice, so don't use "or")
+    trap_name = trap_for_pipe(cfg["outlet_mm"])
+    can_trap = trap_name is not None and cfg["sump_mm"] > 0
+    trap = st.segmented_control(
+        "Cast-iron trap (cloche)", ["Installed", "None"], default="Installed" if can_trap else "None",
+        key=f"trap_{can_trap}", disabled=not can_trap,
+        help="The bell-shaped cast-iron hood over the outlet that keeps floating debris and odours out of the "
+             "sewer. Sized from the outlet pipe (TP-3 ø200, TP-4 ø250, TP-5 ø300).")
+    cfg["has_trap"] = can_trap and trap == "Installed"
+    if not can_trap:
+        st.caption("No trap possible: " + ("it needs a sump for its water seal." if cfg["sump_mm"] == 0 else
+                                           f"no standard trap fits a ø{cfg['outlet_mm']} mm outlet."))
+    elif cfg["has_trap"]:
+        st.caption(f"Model {trap_name}, fitted to the ø{cfg['outlet_mm']} mm outlet.")
     cfg["sensor_depth_mm"] = st.number_input("Sensor depth from grate (mm)", 100, 3000, bm.DEFAULT_SENSOR_DEPTH_MM,
                                              10, key="sdepth", help="Standard mount: 400 mm. Change it if the "
                                                                     "installer had to avoid an obstacle.")
 
-    more = st.expander("More options: trap, incoming pipes / subdrains, sensor blind zone")
+    more = st.expander("More options: incoming pipes / subdrains, sensor blind zone, sediment estimate")
 with more:
-    trap_name = trap_for_pipe(cfg["outlet_mm"])
-    can_trap = trap_name is not None and cfg["sump_mm"] > 0
-    cfg["has_trap"] = st.checkbox(f"Cast-iron trap (cloche) installed{f' · {trap_name}' if can_trap else ''}",
-                                  value=can_trap, disabled=not can_trap, key=f"trap_{can_trap}",
-                                  help="Sized automatically from the outlet pipe (TP-3 ø200, TP-4 ø250, TP-5 ø300). "
-                                       "Needs a sump for its water seal.")
-
     st.markdown("**Incoming pipes / subdrains**")
     inlets_df = st.data_editor(
         pd.DataFrame(columns=["Type", "Depth from grate (mm)", "Diameter (mm)"]).astype(
@@ -118,17 +126,16 @@ with more:
                                            key="blind", help="The sensor can't measure anything closer. ~250 mm "
                                                              "for JSN-SR04T-type waterproof ultrasonic sensors.")
 
-with form:
-    with st.expander("Simulator settings (for demo data generation only)"):
-        scen = list(simulate.SCENARIOS)
-        cfg["sim_scenario"] = st.selectbox("Situation to simulate", scen, key="scen",
-                                           format_func=lambda s: f"{simulate.SCENARIO_SHORT[s]}: {simulate.SCENARIOS[s]}")
-        c1, c2 = st.columns(2)
-        cfg["catchment_m2"] = c1.number_input("Area draining to it (m²)", 20, 20000, 600, 10, key="area")
-        cfg["runoff_coeff"] = c2.number_input("Runoff coefficient C", 0.1, 1.0, 0.9, 0.05, key="c")
-        cfg["sediment_yield"] = c1.number_input("Sediment yield (kg/m²/year)", 0.0, 5.0, 0.15, 0.05, key="yield")
-        cfg["sediment_at_install_mm"] = c2.number_input("Sediment in the sump at installation (mm)", 0, 1000, 50, 10,
-                                                        key="sed0")
+    st.markdown("**For the sediment estimate**")
+    st.caption("The sensor can't see under water, so sump fill is estimated from rain and the area draining "
+               "to the basin. Leave the defaults if you don't know.")
+    c1, c2 = st.columns(2)
+    cfg["catchment_m2"] = c1.number_input("Area draining to it (m²)", 20, 20000, 600, 10, key="area")
+    cfg["runoff_coeff"] = c2.number_input("Runoff coefficient C", 0.1, 1.0, 0.9, 0.05, key="c")
+    cfg["sediment_yield"] = c1.number_input("Sediment yield (kg/m²/year)", 0.0, 5.0, 0.15, 0.05, key="yield")
+    cfg["sediment_at_install_mm"] = c2.number_input("Sediment in the sump at installation (mm)", 0, 1000, 50, 10,
+                                                    key="sed0", help="Measured by the crew when the sensor "
+                                                                     "was installed (0 if just vacuumed).")
 
 with preview:
     row = bm.build_row(cfg)
@@ -151,40 +158,40 @@ with preview:
     id_ok = bool(re.fullmatch(r"[A-Za-z0-9_-]{1,30}", bid))
     if bid and not id_ok:
         st.error("Basin ID: letters, numbers, - or _ only (max 30 characters).")
-    if bid in other_ids:
-        st.error(f"{bid} is already used by a demo or simulated basin.")
-    replace = st.checkbox(f"Replace my existing basin {bid}", key="replace") if bid in user_ids else False
+    replace = st.checkbox(f"Replace the existing basin {bid} (keeps its readings)", key="replace") \
+        if bid in user_ids else False
     errors = [m for lvl, m in checks if lvl == "error"]
-    can_save = id_ok and not errors and bid not in other_ids and (bid not in user_ids or replace)
+    can_save = id_ok and not errors and (bid not in user_ids or replace)
     if st.button("Save basin", type="primary", disabled=not can_save, width="stretch"):
-        with st.spinner("Generating simulated data..."):
-            data_store.save_user_basin(row, replace=replace)
+        data_store.save_monitored_basin(row, replace=replace)
         data_store.select_basin(bid)
         st.session_state["just_saved"] = bid
         st.rerun()
     if st.session_state.get("just_saved"):
         st.success(f"Saved {st.session_state['just_saved']}.")
         st.page_link("dashboard.py", label=f"Open {st.session_state['just_saved']} →")
+        st.caption(f"Record its sensor with:  `python sensor_bridge.py COM3 --basin {st.session_state['just_saved']}`")
     if not bid:
         st.caption("Enter a basin ID to save.")
 
-# ---------------- Your basins ----------------
+# ---------------- Monitored basins ----------------
 st.divider()
-st.subheader("Your basins")
+st.subheader("Basins with a DrainShield sensor")
 if not user_ids:
-    st.write("None yet. They're saved in `data/basins_user.csv`, so you can commit them to GitHub.")
+    st.write("None yet. They're saved in `data/monitored_basins.csv`, so you can commit them to GitHub.")
 else:
-    mine = basins[basins["network"] == "user"]
     st.dataframe(pd.DataFrame({
-        "ID": mine["basin_id"], "Sensor": mine.get("sensor_id"), "Address": mine.get("address"),
-        "Diameter (mm)": (mine["inner_width_cm"] * 10).round(),
-        "Invert depth (mm)": (mine["invert_depth_cm"] * 10).round(),
-        "Outlet ø (mm)": (mine["outlet_diameter_cm"] * 10).round(),
-        "Sump (mm)": (mine["sump_depth_cm"] * 10).round(), "Trap": mine["trap_model"],
-        "Incoming pipes": mine["subdrains"],
+        "ID": basins["basin_id"], "Sensor": basins.get("sensor_id"), "Address": basins.get("address"),
+        "Diameter (mm)": (basins["inner_width_cm"] * 10).round(),
+        "Invert depth (mm)": (basins["invert_depth_cm"] * 10).round(),
+        "Outlet ø (mm)": (basins["outlet_diameter_cm"] * 10).round(),
+        "Sump (mm)": (basins["sump_depth_cm"] * 10).round(), "Trap": basins["trap_model"].fillna("none"),
+        "Incoming pipes": basins["subdrains"],
     }), hide_index=True, width="stretch")
     c1, c2 = st.columns([2, 1])
-    to_delete = c1.selectbox("Delete a basin", sorted(user_ids), key="del")
-    if c2.button("Delete", width="stretch"):
-        data_store.delete_user_basin(to_delete)
+    to_delete = c1.selectbox("Remove a basin (its readings stay in data/live_readings.csv)", sorted(user_ids),
+                             key="del")
+    if c2.button("Remove", width="stretch"):
+        data_store.delete_monitored_basin(to_delete)
+        st.session_state.pop("basin_id", None)
         st.rerun()

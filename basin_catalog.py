@@ -2,7 +2,7 @@
 basin_catalog.py
 ----------------
 The catalogue of precast catch basin models we know about, and the code that turns
-"model + the parts stacked on top of it" into the dimensions the simulator,
+"model + the parts stacked on top of it" into the dimensions the dashboard,
 the processing and the drawing need.
 
 Sources: Lécuyer catalogue page 263 (P-1) and Phil's notes on the other Lécuyer

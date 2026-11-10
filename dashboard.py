@@ -15,23 +15,27 @@ from plotly.subplots import make_subplots
 import data_store
 import maintenance
 import processing as proc
-import simulate
 import ui
 import weather
 from basin_drawing import basin_svg
 
 ui.inject_css()
-basins, readings, rain, events, truth = data_store.load_all()
-t_min = rain["timestamp"].min()
+basins, readings, rain, events, _ = data_store.load_all()
 key = data_store.data_key()
 ids = list(basins["basin_id"])
+if not ids:
+    st.title("Basin")
+    st.info("No catch basin has a sensor yet. Attach one on the **Add basin** page (or click a grey dot on the "
+            "Network map), using the same ID as the sensor bridge.")
+    st.page_link("basin_setup.py", label="Add basin →")
+    st.stop()
 if st.session_state.get("basin_id") not in ids:
     st.session_state["basin_id"] = ids[0]
 
 
 def basin_label(basin_id):
     b = data_store.basin_row(basins, basin_id)
-    return f"{basin_id} · {data_store.NETWORK_NAMES[b['network']]}"
+    return f"{basin_id} · {b['address']}" if isinstance(b.get("address"), str) and b["address"] else basin_id
 
 
 with st.sidebar:
@@ -40,14 +44,14 @@ with st.sidebar:
                  format_func=basin_label,
                  on_change=lambda: data_store.select_basin(st.session_state["basin_select"]))
 
-now = pd.Timestamp(st.session_state["now"])
+now = data_store.now()
 basin = data_store.basin_row(basins, st.session_state["basin_id"])
 levels = data_store.levels_for(key, basin["basin_id"])
 S = data_store.status_for(key, basin["basin_id"], now)
 hist = S["history"]
 inv, G = basin["outlet_invert_cm"], basin["grate_height_cm"]
 eng = data_store.engineering()
-forecast = weather.simulated_forecast(rain, now)
+forecast = weather.forecast_from_series(rain, now)
 cat, priority, _ = data_store.triage(basin, S, forecast)
 
 # ---------------------------------------------------------------------------
@@ -93,25 +97,17 @@ if not rows:
 st.html(ui.dispatch_card(b_key, b_icon, "What to do", b_head, rows))
 
 
-@st.dialog("Log maintenance")
-def log_dialog():
-    st.write(f"**{basin['basin_id']}** · {address}")
-    action = st.radio("What did the crew do?", maintenance.ACTIONS, index=4)
-    sed = None
-    if action == "Cleaned / vacuumed":
-        sed = st.number_input("Sediment left in the sump after cleaning (mm)", 0, 1000, 0, 10,
+c1, c2 = st.columns([1.6, 3])
+with c1.expander("✅ Log maintenance"):
+    with st.form("log_form", clear_on_submit=True, border=False):
+        action = st.radio("What did the crew do?", maintenance.ACTIONS, index=4)
+        sed = st.number_input("If cleaned: sediment left in the sump (mm)", 0, 1000, 0, 10,
                               help="Usually 0. Used to restart the sump-fill estimate.")
-    note = st.text_input("Note (optional)")
-    st.caption(f"Logged at {now:%b %d %H:%M} (the replay time).")
-    if st.button("Save", type="primary", width="stretch"):
-        maintenance.add(basin["basin_id"], now, action, sed, note)
-        st.cache_data.clear()
-        st.rerun()
-
-
-c1, c2, _ = st.columns([1.1, 1.3, 3])
-if c1.button("✅ Log maintenance", width="stretch"):
-    log_dialog()
+        note = st.text_input("Note (optional)")
+        if st.form_submit_button("Save", type="primary", width="stretch"):
+            maintenance.add(basin["basin_id"], now, action, sed if action == "Cleaned / vacuumed" else None, note)
+            st.cache_data.clear()
+            st.rerun()
 c2.page_link("network.py", label="← Back to the network map")
 st.write("")
 
@@ -180,7 +176,7 @@ with detail_box:
         e = past.iloc[::-1].iloc[storm_opts.index(zoom) - 1]
         t0, t1 = e["start"] - timedelta(hours=1), min(e["end"] + timedelta(hours=6), now)
     else:
-        span = {"Last 24 h": timedelta(days=1), "Last 7 days": timedelta(days=7), "Everything": now - t_min}[window]
+        span = {"Last 24 h": timedelta(days=1), "Last 7 days": timedelta(days=7), "Everything": now - (levels["timestamp"].min() if not levels.empty else now)}[window]
         t0, t1 = now - span, now
 
     def elev(cm_above_floor):
@@ -195,7 +191,7 @@ with detail_box:
         br["timestamp"] -= timedelta(minutes=1)
         lv = pd.concat([lv, br]).sort_values("timestamp")
     rn = rain[(rain["timestamp"] >= t0) & (rain["timestamp"] <= t1)].set_index("timestamp")["rain_mm"]
-    rn = rn.resample("h").sum() if (t1 - t0) > timedelta(days=2) else rn * 12
+    rn = rn.resample("h").sum()                     # mm in each hour = mm/h
 
     sub_cm = proc.subdrain_above_invert_cm(basin)
     limit = basin["sensor_height_cm"] - basin["sensor_blind_zone_cm"]
@@ -289,18 +285,6 @@ with st.expander("As-built details"):
 | Incoming pipes / subdrains | {inlets.replace('|', ', ').replace(':', ' ', 1) if inlets else 'none'} |
 | Sensor pod | {basin['sensor_depth_cm'] * 10:.0f} mm below the grate, sees water up to {(G - limit) * 10:.0f} mm below the grate |
 """)
-
-if not truth.empty and basin["basin_id"] in set(truth["basin_id"]):
-    with st.expander("Demo data (simulator only)"):
-        tr = truth[(truth["basin_id"] == basin["basin_id"]) & (truth["date"] <= now)]
-        st.caption(f"Simulated situation: {simulate.SCENARIOS.get(basin['sim_scenario'], basin['sim_scenario'])}")
-        if not tr.empty:
-            last = tr.iloc[-1]
-            c1, c2, c3 = st.columns(3)
-            c1.metric("True sediment", f"{last['sediment_cm']:.0f} cm", f"estimate: {S['sediment_cm']:.0f} cm",
-                      delta_color="off")
-            c2.metric("True outlet opening", f"{last['outlet_open_pct']:.0f}%")
-            c3.metric("True grate opening", f"{last['grate_open_pct']:.0f}%")
 
 with st.expander("How the status is decided"):
     st.markdown(f"""
