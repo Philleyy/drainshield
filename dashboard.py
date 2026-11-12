@@ -65,6 +65,10 @@ address = basin.get("address") if isinstance(basin.get("address"), str) else ""
 muni_id = f" · municipal #{basin['municipal_id']}" if pd.notna(basin.get("municipal_id")) and basin.get("municipal_id") else ""
 st.caption(f"{address or 'No address'}{muni_id} · ø{basin['inner_width_cm'] * 10:.0f} mm · outlet invert "
            f"{basin['invert_depth_cm'] / 100:.2f} m below street · as of **{now:%b %d, %Y %H:%M}**")
+if basin.get("cal_status") == "learning":
+    st.info(f"📏 **Calibrating:** the sensor is learning where the water normally rests: "
+            f"{basin.get('cal_note', '')}. Until then, depths use the bracket's standard position and may be "
+            "off by a few cm.")
 
 # ---------------------------------------------------------------------------
 # ACTION BANNER + 3-PART DIAGNOSIS + CREW LOG BUTTON
@@ -274,6 +278,8 @@ with detail_box:
 # DETAILS
 # ---------------------------------------------------------------------------
 with st.expander("As-built details"):
+    cal_text = (f"learned from {basin['cal_hours']:.0f} h of resting water" if basin.get("cal_status") == "learned"
+                else "standard bracket position, still learning")
     inlets = basin.get("inlets") if isinstance(basin.get("inlets"), str) else ""
     st.markdown(f"""
 | | |
@@ -283,7 +289,7 @@ with st.expander("As-built details"):
 | Sump (réserve) | {basin['sump_depth_cm'] * 10:.0f} mm, floor at {G * 10:.0f} mm |
 | Cast-iron trap | {basin['trap_model'] or 'none'} |
 | Incoming pipes / subdrains | {inlets.replace('|', ', ').replace(':', ' ', 1) if inlets else 'none'} |
-| Sensor pod | {basin['sensor_depth_cm'] * 10:.0f} mm below the grate, sees water up to {(G - limit) * 10:.0f} mm below the grate |
+| Sensor pod | {basin['sensor_depth_cm'] * 10:.0f} mm below the grate ({cal_text}), sees water up to {(G - limit) * 10:.0f} mm below the grate |
 """)
 
 with st.expander("How the status is decided"):
@@ -297,4 +303,7 @@ with st.expander("How the status is decided"):
   Clogging doesn't fix itself, so the worst storm since the last cleaning counts.
 - **Drainage capacity** ≈ 1 ÷ (how many times higher than normal it rose). It's a rough estimate (±30%).
 - **Sump fill** is estimated from rain and drainage area, never measured: the sensor can't see under water.
+- **Calibration** is automatic: in dry weather the water rests at the outlet invert, so the sensor learns that
+  distance from its first steady, dry hours after installation (or after "Sensor installed / re-installed" is
+  logged). Nobody measures the sensor height.
 """)

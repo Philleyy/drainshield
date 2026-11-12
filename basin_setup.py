@@ -15,6 +15,7 @@ import streamlit as st
 
 import basin_model as bm
 import data_store
+import maintenance
 import ui
 from basin_catalog import trap_for_pipe
 from basin_drawing import basin_svg
@@ -28,15 +29,22 @@ cfg = bm.default_config()
 muni = data_store.municipal_basins()
 attached = set(basins["municipal_id"].dropna().astype(str)) if "municipal_id" in basins else set()
 muni = muni[~muni["municipal_id"].isin(attached)]
-muni_label = dict(zip(muni["municipal_id"], muni["address"]))
+if "score" in muni:                                   # best pilot candidates first in the list
+    muni = muni.sort_values(["pilot_site", "score"], ascending=[True, False], na_position="last")
+star = {m: (" · ⭐" if pd.notna(ps) else "") + (f" · tier {t}" if isinstance(t, str) and t != "–" else "")
+        for m, ps, t in zip(muni["municipal_id"], muni.get("pilot_site", [None] * len(muni)),
+                            muni.get("tier", [None] * len(muni)))}
+muni_label = {m: f"{a}{star[m]}" for m, a in zip(muni["municipal_id"], muni["address"])}
 
 
 def use_municipal():
-    """Copy the chosen municipal basin's position into the form."""
+    """Copy the chosen municipal basin's position (and estimated catchment area) into the form."""
     mid = st.session_state.get("muni_pick")
     if mid:
         row = muni[muni["municipal_id"] == mid].iloc[0]
         st.session_state["lat"], st.session_state["lon"] = float(row["latitude"]), float(row["longitude"])
+        if pd.notna(row.get("catchment_m2")) and row["catchment_m2"] > 0:
+            st.session_state["area"] = int(min(20000, max(20, round(row["catchment_m2"] / 10) * 10)))
         if not st.session_state.get("bid"):
             st.session_state["bid"] = f"DOR-{mid}"
 
@@ -47,6 +55,7 @@ if "prefill" in st.session_state:
     st.session_state["muni_pick"] = p["municipal_id"]
     st.session_state["lat"], st.session_state["lon"] = p["latitude"], p["longitude"]
     st.session_state.setdefault("bid", f"DOR-{p['municipal_id']}")
+    use_municipal()
 
 st.title("Add a basin")
 st.caption("From the as-built plan (plan tel que construit). Depths are measured down from the street grate. "
@@ -60,6 +69,14 @@ with form:
                        on_change=use_municipal, placeholder="🔍 Search the city's catch basins by number or street",
                        format_func=lambda m: f"#{m} · {muni_label.get(m, '')}",
                        help="From the Ville de Montréal open data. Picking one fills in the position.")
+    if mid:
+        info = muni[muni["municipal_id"] == mid].iloc[0]
+        if pd.notna(info.get("tier_label")):
+            pilot = f" · ⭐ pilot site {int(info['pilot_site'])} ({info['pilot_role']})" \
+                if pd.notna(info.get("pilot_site")) else ""
+            st.caption(f"Pilot priority: **{info['priority_level']}** ({info['tier_label']}){pilot}")
+        if info.get("sensor_compatible") != True:                                   # noqa: E712 (NaN-safe)
+            st.warning(f"Sensor fit: {info.get('compatibility', 'unknown')}.")
     c1, c2 = st.columns(2)
     cfg["basin_id"] = c1.text_input("Basin ID", placeholder="e.g. DOR-101", key="bid",
                                     on_change=lambda: st.session_state.pop("just_saved", None)).strip()
@@ -98,12 +115,15 @@ with form:
                                            f"no standard trap fits a ø{cfg['outlet_mm']} mm outlet."))
     elif cfg["has_trap"]:
         st.caption(f"Model {trap_name}, fitted to the ø{cfg['outlet_mm']} mm outlet.")
-    cfg["sensor_depth_mm"] = st.number_input("Sensor depth from grate (mm)", 100, 3000, bm.DEFAULT_SENSOR_DEPTH_MM,
-                                             10, key="sdepth", help="Standard mount: 400 mm. Change it if the "
-                                                                    "installer had to avoid an obstacle.")
+    st.caption("📏 **No need to measure the sensor height.** After installation the sensor learns where the "
+               "water normally rests (at the outlet invert) on the first dry day, and measures everything from there.")
 
-    more = st.expander("More options: incoming pipes / subdrains, sensor blind zone, sediment estimate")
+    more = st.expander("More options: bracket depth, incoming pipes / subdrains, blind zone, sediment estimate")
 with more:
+    cfg["sensor_depth_mm"] = st.number_input(
+        "Bracket depth below the grate, approximate (mm)", 100, 3000, bm.DEFAULT_SENSOR_DEPTH_MM, 10, key="sdepth",
+        help="Standard DrainShield bracket: 400 mm. Only used until the sensor has learned the resting level, "
+             "and to warn if what it learns is far from expected.")
     st.markdown("**Incoming pipes / subdrains**")
     inlets_df = st.data_editor(
         pd.DataFrame(columns=["Type", "Depth from grate (mm)", "Diameter (mm)"]).astype(
@@ -130,7 +150,10 @@ with more:
     st.caption("The sensor can't see under water, so sump fill is estimated from rain and the area draining "
                "to the basin. Leave the defaults if you don't know.")
     c1, c2 = st.columns(2)
-    cfg["catchment_m2"] = c1.number_input("Area draining to it (m²)", 20, 20000, 600, 10, key="area")
+    cfg["catchment_m2"] = c1.number_input("Area draining to it (m²)", 20, 20000, 600, 10, key="area",
+                                          help="Filled in from the prioritization (nearest-basin area within 75 m) "
+                                               "when you pick a city basin. A rough estimate: correct it if you know "
+                                               "better.")
     cfg["runoff_coeff"] = c2.number_input("Runoff coefficient C", 0.1, 1.0, 0.9, 0.05, key="c")
     cfg["sediment_yield"] = c1.number_input("Sediment yield (kg/m²/year)", 0.0, 5.0, 0.15, 0.05, key="yield")
     cfg["sediment_at_install_mm"] = c2.number_input("Sediment in the sump at installation (mm)", 0, 1000, 50, 10,
@@ -146,7 +169,7 @@ with preview:
     c1.html(ui.tile("Outlet invert depth", f"{cfg['invert_depth_mm']:.0f} mm", "below the grate", "neutral"))
     c2.html(ui.tile("Total depth (to floor)", f"{depth:.0f} mm", f"invert + {cfg['sump_mm']} mm sump", "neutral"))
     c3.html(ui.tile("Flood buffer", f"{cfg['invert_depth_mm'] - cfg['sensor_depth_mm']:.0f} mm",
-                    "invert to sensor", "neutral"))
+                    "invert to sensor (approx., learned after install)", "neutral"))
     st.caption(f"The sensor sees water up to {cfg['sensor_depth_mm'] + cfg['blind_zone_mm']:.0f} mm below the "
                f"grate (its {cfg['blind_zone_mm']:.0f} mm blind zone hides anything closer).")
 
@@ -164,6 +187,7 @@ with preview:
     can_save = id_ok and not errors and (bid not in user_ids or replace)
     if st.button("Save basin", type="primary", disabled=not can_save, width="stretch"):
         data_store.save_monitored_basin(row, replace=replace)
+        maintenance.add(bid, data_store.now(), maintenance.INSTALL, note="Added in the dashboard")  # start learning
         data_store.select_basin(bid)
         st.session_state["just_saved"] = bid
         st.rerun()

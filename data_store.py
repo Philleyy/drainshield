@@ -46,7 +46,7 @@ def now():
 
 def data_key():
     """Changes whenever a basin file or the readings change (used to refresh caches)."""
-    return (_mtime(MONITORED_FILE), _mtime(LIVE_FILE), _mtime(REGISTRY_FILE))
+    return (_mtime(MONITORED_FILE), _mtime(LIVE_FILE), _mtime(REGISTRY_FILE), _mtime(maintenance.LOG_FILE))
 
 
 @st.cache_data(show_spinner=False)
@@ -60,6 +60,10 @@ def _load(key):
     readings["timestamp"] = pd.to_datetime(readings["timestamp"])
     readings["distance_cm"] = pd.to_numeric(readings["distance_cm"], errors="coerce")
     readings["battery_v"] = pd.to_numeric(readings["battery_v"], errors="coerce")
+    if not basins.empty and "sensor_height_cm" in basins:      # learn each sensor's height from the water
+        log = maintenance.load()
+        basins = pd.DataFrame([proc.calibrate(b, readings, maintenance.last_install(log, b["basin_id"]))
+                               for _, b in basins.iterrows()]).reset_index(drop=True)
     return basins, readings
 
 
@@ -71,12 +75,42 @@ def load_all():
     return basins, readings, rain, proc.rain_events(rain), pd.DataFrame()
 
 
-@st.cache_data(show_spinner=False)
+# Pilot prioritization (import_priorities.py): load x low point, see README. Three levels on the map.
+PRIORITY_FILE = os.path.join(DATA, "basin_priorities.csv")
+PRIORITY = {   # level: (tiers, colour, dot size, legend)
+    "High": ("A", "#4b2bb3", 11, "A: big catchment + confirmed low point"),
+    "Moderate": ("BCD", "#8b72e8", 8, "B–D: one of the two (or elevation unknown)"),
+    "Low": ("EF", "#a9a8a2", 6, "E–F: neither"),
+    "Not compatible": ("–", "#d9d7d0", 5, "not a round basin, or type unknown"),
+}
+
+
+def priority_level(tier):
+    return next((lvl for lvl, (tiers, *_) in PRIORITY.items() if isinstance(tier, str) and tier in tiers),
+                "Not compatible")
+
+
 def municipal_basins():
-    """Every catch basin of the municipality (Ville de Montréal open data)."""
+    """Every catch basin of the municipality (Ville de Montréal open data) + its pilot priority."""
+    return _municipal(_mtime(REGISTRY_FILE), _mtime(PRIORITY_FILE))
+
+
+@st.cache_data(show_spinner=False)
+def _municipal(*key):
     if not os.path.exists(REGISTRY_FILE):
-        return pd.DataFrame(columns=["municipal_id", "address", "latitude", "longitude", "basin_type"])
-    return pd.read_csv(REGISTRY_FILE, dtype={"municipal_id": str})
+        return pd.DataFrame(columns=["municipal_id", "address", "latitude", "longitude", "basin_type", "tier",
+                                     "priority_level"])
+    reg = pd.read_csv(REGISTRY_FILE, dtype={"municipal_id": str})
+    if os.path.exists(PRIORITY_FILE):
+        pri = pd.read_csv(PRIORITY_FILE, dtype={"municipal_id": str})
+        reg = reg.merge(pri, on="municipal_id", how="left")
+        missing = reg["tier_label"].isna()
+        reg.loc[missing, "tier_label"] = "Not analysed (not in the prioritization file)"
+        reg.loc[missing, "compatibility"] = "Not analysed"
+    else:
+        reg["tier"] = None
+    reg["priority_level"] = reg["tier"].map(priority_level)
+    return reg
 
 
 def center():

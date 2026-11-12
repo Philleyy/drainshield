@@ -7,7 +7,7 @@ The crew's maintenance log, and the life cycle of each issue:
 
 Each entry is one line of data/maintenance_log.csv:
     basin_id, time, action, sediment_mm, note
-`time` is the moment the crew did it (in the demo: the replay time).
+`time` is the moment the crew did it.
 "Cleaned / vacuumed" and "No issue found" close the issue: storms before that
 moment no longer count, and the sediment estimate restarts from what the crew measured.
 """
@@ -20,7 +20,8 @@ LOG_FILE = os.path.join("data", "maintenance_log.csv")
 COLUMNS = ["basin_id", "time", "action", "sediment_mm", "note"]
 
 ACTIONS = ["Crew dispatched", "Inspected", "Obstruction found", "Requires further investigation",
-           "Cleaned / vacuumed", "No issue found"]
+           "Cleaned / vacuumed", "No issue found", "Sensor installed / re-installed"]
+INSTALL = "Sensor installed / re-installed"     # the sensor re-learns its resting level after this
 RESOLVES = {"Cleaned / vacuumed", "No issue found"}
 
 
@@ -65,3 +66,11 @@ def lifecycle(S, entries):
         return None
     after = entries[entries["time"] >= S["issue_since"]] if not entries.empty else entries
     return "Verified / crew dispatched" if not after.empty else "Detected (unverified)"
+
+
+def last_install(log, basin_id):
+    """When the sensor was last (re)installed in this basin, or None."""
+    if log.empty:
+        return None
+    e = log[(log["basin_id"] == basin_id) & (log["action"] == INSTALL)]
+    return None if e.empty else e["time"].max()

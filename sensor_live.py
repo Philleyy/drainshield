@@ -93,9 +93,11 @@ choice = st.segmented_control("Interval", list(options), default=current, format
 if choice and choice != current:
     data_store.set_interval(sensor, choice)
     st.toast(f"Interval for {sensor} set to {options[choice].lower()}. The bridge applies it within ~2 s.")
-st.caption("The bridge sends the new interval to the Arduino (command `I,<ms>`). The DrainShield sketch confirms "
+st.caption("This is the **dry-weather** interval. When the water starts moving (more than 0.3 cm/min), the "
+           "DrainShield sketch switches by itself to **every 30 s** (or this interval, if shorter) until it has been "
+           "still for 30 min. The bridge sends your choice to the Arduino (command `I,<ms>`) and the sketch confirms "
            "it; with the first test sketch the bridge keeps one reading per interval instead. In the field, a "
-           "LoRaWAN sensor would receive the new interval at its next transmission.")
+           "cellular sensor would receive the new interval at its next transmission.")
 
 # ---------------------------------------------------------------------------
 # Chart
@@ -124,8 +126,10 @@ if sensor in set(basins["basin_id"]) and not r.dropna(subset=["distance_cm"]).em
     b = data_store.basin_row(basins, sensor)
     d = r.dropna(subset=["distance_cm"]).iloc[-1]["distance_cm"]
     level = b["sensor_height_cm"] - d - b["outlet_invert_cm"]
+    cal = (f"calibrated from {b['cal_hours']:.0f} h of resting water" if b.get("cal_status") == "learned"
+           else f"still calibrating: {b.get('cal_note', '')}")
     st.info(f"Configured as a catch basin: water **{proc.depth_below_street_m(b, level):.2f} m below the street** "
-            f"({proc.format_level(level)} vs. the outlet invert).")
+            f"({proc.format_level(level)} vs. its normal resting level) · {cal}.")
     st.page_link("dashboard.py", label=f"Open {sensor} in the Basin page →")
 elif sensor not in set(basins["basin_id"]):
     st.caption(f"{sensor} isn't attached to a catch basin yet: use **Add basin** with the same ID when it goes "

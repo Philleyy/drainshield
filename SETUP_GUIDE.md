@@ -96,7 +96,7 @@ If you change the code while it's running, click **Rerun** at the top right of t
 1. Wire the sensor: VCC → 5V, GND → GND, Trig → pin 13, Echo → pin 12.
 2. In the **Arduino IDE**, open `arduino\drainshield_sensor\drainshield_sensor.ino`, pick your board and
    port (**Tools** menu) and click **Upload**. Open the Serial Monitor at **9600 baud** to check you see
-   lines like `DIST,123.4,5`, then **close the Serial Monitor** (only one program can use the port).
+   lines like `DIST,123.4,5,0.00,123.5` (filtered distance, good pings, water movement in cm/min, raw distance), then **close the Serial Monitor** (only one program can use the port).
 3. Keep the dashboard running in the first terminal. Open a **second terminal** in VS Code
    (the **+** at the top right of the terminal panel) and type:
    ```
@@ -116,6 +116,9 @@ If you change the code while it's running, click **Rerun** at the top right of t
 **Bench test ideas:** hold a board at 30, 50, 100, 150 cm (tape measure) and compare; check the
 closest distance it can read (the blind zone); point it down a bucket of water; check the noise tile
 (under 1 cm on a still target is good).
+
+**No tape measure needed in a real basin:** the dashboard learns the sensor's position from the resting water
+level during its first dry, steady hours (the Basin page says "Calibrating" until then).
 
 **When it goes into a real basin:** use **Add basin** with the same ID you give `--basin`
 (e.g. pick the city's catch basin, ID `DOR-12345`), then run

@@ -41,6 +41,28 @@ sensor health, hydrographs and history):
 - **Add basin**: attach a sensor to one of the city's catch basins and enter the as-built plan (diameter,
   invert, outlet pipe, sump, **cast-iron trap installed or not**), with a live drawing.
 
+## Pilot priority (which basins to equip first)
+
+The **Network** map colours every basin without a sensor by pilot priority, from the prioritization file
+(`import_priorities.py` → `data/basin_priorities.csv`):
+
+| Map colour | Tiers | Meaning |
+|---|---|---|
+| Dark purple | A | Big catchment **and** confirmed local low point: water arrives in quantity and has nowhere to go |
+| Purple | B–D | One of the two (or big catchment with unknown elevation) |
+| Grey | E–F | Neither |
+| Light grey | – | Not a round basin, type unknown in the inventory, or not analysed |
+
+Ringed dots are the **10 proposed pilot sites**: one anchor + two neighbours each, so a clog can be told apart
+from a whole street being overloaded. The basin card shows the tier, score, estimated catchment, low point and
+whether our bracket fits; **Add basin** fills in the catchment area for the sediment estimate.
+It's a ranking to choose pilot sites (prioritization, not prediction): it uses inventory points, not real terrain,
+and only about a third of the basins have an elevation. Update it with:
+
+```
+python import_priorities.py path/to/puisards_dorval_prioritized.csv
+```
+
 ## How a problem is detected
 
 After every storm we compare how high the water rose with what the same basin did when it was clean:
@@ -58,6 +80,17 @@ The ratio gives a rough **outlet capacity estimate**. If **15 mm or more** of ra
 "Cleaned / vacuumed" (or "No issue found") closes the issue: older storms stop counting and the
 sediment estimate restarts from what the crew measured.
 
+**Self-calibration (no sensor height to measure):** in dry weather the water rests at the outlet invert, so
+the distance the sensor sees on a dry, steady day is the distance to the invert. The dashboard learns it from
+the first 6–48 steady hours after installation (logged automatically when a basin is added, or with
+"Sensor installed / re-installed" in the maintenance log) and measures everything from there. The bracket's
+standard depth (400 mm) is only used until then, and as a sanity check (±15 cm).
+
+**On the sensor (Arduino):** median of 5 pings, then a tracking loop with a PID structure that smooths the
+level, estimates how fast it moves and ignores sudden jumps (false echoes) unless 3 readings in a row agree.
+It switches itself to a reading every 30 s while the water moves (storm mode), and back to the slow
+dry-weather interval after 30 still minutes.
+
 **What the sensor can't see:** it measures the distance to the water surface only. The sump contents are
 **estimated** (rain × drainage area × sediment yield), and water closer than its blind zone
 (~0.65 m below the street with the pod at 0.40 m) shows as "≤ 0.65 m".
@@ -69,17 +102,18 @@ sediment estimate restarts from what the crew measured.
 | `app.py` | Starts the dashboard, logo, view switch, auto-refresh |
 | `network.py` · `dashboard.py` · `sensor_live.py` · `basin_setup.py` | The four pages |
 | `sensor_bridge.py` | USB serial → `data/live_readings.csv`; sends the chosen interval back to the Arduino |
-| `arduino/drainshield_sensor/drainshield_sensor.ino` | Arduino sketch: median of 5 pings, timeout, temperature correction, adjustable interval |
+| `arduino/drainshield_sensor/drainshield_sensor.ino` | Arduino sketch: median of 5 pings, tracking loop, storm mode, temperature correction, adjustable interval |
 | `processing.py` | Readings → water level, storms, diagnosis, estimates, status. **All thresholds at the top** |
 | `weather.py` | Past and forecast rain (Environment Canada GEM model via Open-Meteo) and the ECCC radar layer |
 | `maintenance.py` | Crew maintenance log and issue life cycle (`data/maintenance_log.csv`) |
 | `basin_model.py` | As-built values (depths from the grate) → the numbers the model uses |
 | `basin_drawing.py` | The to-scale cross-section |
 | `import_municipal.py` | Makes `data/municipal_basins.csv` from the Ville de Montréal `ego_puisard_p.csv` |
+| `import_priorities.py` | Makes `data/basin_priorities.csv` (tiers, score, catchment, low points, pilot sites) |
 | `basin_catalog.py` | Reference: Lécuyer precast models and TP-3/4/5 traps |
 | `data_store.py` · `ui.py` | Data loading and page building blocks |
 
-**Data files:** `data/municipal_basins.csv` (the city's basins), `data/monitored_basins.csv` (basins with a
+**Data files:** `data/municipal_basins.csv` (the city's basins), `data/basin_priorities.csv` (pilot priority), `data/monitored_basins.csv` (basins with a
 sensor, made by **Add basin**), `data/live_readings.csv` (written by the bridge), `data/maintenance_log.csv`,
 `data/sensor_settings.json` (reading interval per sensor).
 

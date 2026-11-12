@@ -147,6 +147,49 @@ def subdrain_above_invert_cm(basin):
     return basin["subdrain_height_cm"] - basin["outlet_invert_cm"]
 
 
+# ---------------------------------------------------------------------------
+# SELF-CALIBRATION: the sump is its own tape measure
+# ---------------------------------------------------------------------------
+# In dry weather the water in the sump rests at the outlet invert (anything higher drains
+# out the pipe). So the distance the sensor sees on a dry, steady day IS the distance to
+# the invert, and nobody has to measure the sensor height. The bracket's nominal depth is
+# only a fallback until that happens, and a sanity check.
+STEADY_RANGE_CM = 1.0       # an hour counts as "steady" if the readings vary less than this
+CAL_TOLERANCE_CM = 15       # resting level must be within this of the expected one (else: sump not refilled yet?)
+CAL_MIN_HOURS = 6           # steady hours needed before trusting the learned level
+CAL_HOURS = 48              # learn from the first 48 steady hours after install, then lock it
+
+
+def calibrate(basin, readings, installed=None):
+    """Return a copy of the basin row with sensor_height_cm learned from the readings.
+    cal_status: 'learned' or 'learning' (still using the bracket's nominal depth)."""
+    b = basin.copy()
+    nominal = b["sensor_height_cm"] - b["outlet_invert_cm"]          # expected distance to the invert
+    r = readings[(readings["basin_id"] == b["basin_id"])].dropna(subset=["distance_cm"])
+    if installed is not None:
+        r = r[r["timestamp"] >= installed]
+    b["cal_nominal_cm"], b["cal_status"], b["cal_hours"], b["cal_note"] = nominal, "learning", 0, ""
+    if r.empty:
+        b["cal_note"] = "waiting for readings"
+        return b
+    hourly = r.set_index("timestamp")["distance_cm"].resample("h").agg(["median", "min", "max", "count"])
+    steady = hourly[(hourly["count"] >= 3) & (hourly["max"] - hourly["min"] < STEADY_RANGE_CM)]
+    good = steady[(steady["median"] - nominal).abs() <= CAL_TOLERANCE_CM].head(CAL_HOURS)
+    b["cal_hours"] = len(good)
+    if len(good) >= CAL_MIN_HOURS:
+        learned = float(good["median"].median())
+        b["sensor_height_cm"] = b["outlet_invert_cm"] + learned
+        b["sensor_depth_cm"] = b["grate_height_cm"] - b["sensor_height_cm"]
+        b["cal_status"], b["cal_learned_cm"] = "learned", learned
+    elif not steady.empty and good.empty:
+        off = float(steady["median"].median() - nominal)
+        b["cal_note"] = (f"resting water is {abs(off):.0f} cm {'lower' if off > 0 else 'higher'} than expected "
+                         "(sump not refilled since cleaning, or bracket at another height)")
+    else:
+        b["cal_note"] = f"needs a dry, steady day ({len(good)} of {CAL_MIN_HOURS} h so far)"
+    return b
+
+
 def water_levels(readings, basin):
     r = readings[readings["basin_id"] == basin["basin_id"]].sort_values("timestamp").copy()
     level = (basin["sensor_height_cm"] - r["distance_cm"]) - basin["outlet_invert_cm"]

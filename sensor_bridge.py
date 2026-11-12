@@ -16,8 +16,9 @@ Stop it with Ctrl+C. Close the Arduino IDE's Serial Monitor first: only one prog
 can use the port at a time.
 
 It understands two kinds of Arduino output:
-    DIST,123.4,5         (drainshield_sensor.ino: distance in cm, number of good pings)
-    Distance: 123.4      (your first test sketch)
+    DIST,123.4,5,0.20,123.6   (drainshield_sensor.ino: filtered distance in cm, good pings,
+                               rise rate in cm/min, raw distance; only the filtered distance is saved)
+    Distance: 123.4           (your first test sketch)
 With the first test sketch (which sends 20 readings a second), the bridge keeps one
 reading per interval: the median of what it received, to ignore false echoes.
 """
@@ -129,7 +130,12 @@ def run(port, basin, baud):
             firmware = "drainshield"
             stamp = save_reading(basin, value)
             write_status(basin, firmware=firmware, last_seen=stamp, last_distance_cm=value)
-            print(f"{stamp}  {basin}  {'no echo' if value is None else f'{value:.1f} cm'}")
+            extra = raw.strip().split(",")
+            try:
+                rise = f"  water {float(extra[3]):+.2f} cm/min" if float(extra[3]) != 0 else ""
+            except (IndexError, ValueError):
+                rise = ""
+            print(f"{stamp}  {basin}  {'no echo' if value is None else f'{value:.1f} cm'}{rise}")
         elif kind == "legacy":                          # first test sketch: keep 1 reading per interval
             firmware = "basic test sketch"
             if value is not None:

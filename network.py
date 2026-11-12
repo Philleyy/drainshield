@@ -1,7 +1,9 @@
 """
 network.py: the overview (home screen)
 --------------------------------------
-* Every catch basin of the municipality (Ville de Montréal open data): grey dots = no sensor yet.
+* Every catch basin of the municipality (Ville de Montréal open data). Without a sensor, they are
+  coloured by PILOT PRIORITY (import_priorities.py): purple = big catchment and/or local low point.
+  Ringed dots = the 10 proposed pilot sites (1 anchor + 2 neighbours/controls each).
 * Basins with a DrainShield sensor are coloured by what to do:
       🔴 Urgent · 🟠 Inspect · 🟢 Normal · ⚫ Offline (sensor problem)
   The pills at the top filter the map and the list.
@@ -12,6 +14,7 @@ network.py: the overview (home screen)
 
 import math
 
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -38,6 +41,10 @@ with st.sidebar:
     st.markdown("**Map layers**")
     street_map = st.toggle("Street map", value=True, help="Needs internet. Turn off if the map stays blank.")
     radar = st.toggle("Live ECCC weather radar", value=False, help="Environment Canada 1 km precipitation radar.")
+    by_priority = st.toggle("Colour by pilot priority", value=True,
+                            help="Basins without a sensor, coloured by catchment area × local low point "
+                                 "(a ranking to choose pilot sites, not a flood prediction).")
+    show_pilots = st.toggle("Show the 10 pilot sites", value=True)
 
 st.title(f"{owner.replace('Dorval - Ile Dorval', 'Dorval')} catch basins")
 st.caption(f"{len(registry):,} catch basins from the Ville de Montréal open data · "
@@ -93,8 +100,9 @@ show_grey = "No sensor" in chosen
 def pick_from_map():
     pts = st.session_state["map"].selection.points
     if pts:
-        cd = pts[0]["customdata"]
-        st.session_state["picked"] = (cd[1], cd[0])
+        cd = pts[0].get("customdata")
+        if cd:
+            st.session_state["picked"] = (cd[1], cd[0])
 
 
 def pick_from_search():
@@ -124,12 +132,26 @@ with map_col:
         if not src.empty:
             center, zoom = {"lat": src["latitude"].iloc[0], "lon": src["longitude"].iloc[0]}, 17.0
     fig = go.Figure()
+    pilots = registry[registry["pilot_site"].notna()] if "pilot_site" in registry else registry.iloc[0:0]
+    if show_pilots and not pilots.empty:          # a dark ring under each pilot basin
+        for size, color in ((19, "#0b2d5b"), (15, "#ffffff")):
+            fig.add_trace(go.Scattermap(
+                lat=pilots["latitude"], lon=pilots["longitude"], mode="markers", marker=dict(size=size, color=color),
+                customdata=list(zip(pilots["municipal_id"], ["muni"] * len(pilots))), hoverinfo="skip"))
     if show_grey and not unmonitored.empty:
-        fig.add_trace(go.Scattermap(
-            lat=unmonitored["latitude"], lon=unmonitored["longitude"], mode="markers", name="No sensor",
-            marker=dict(size=6, color="#a9a8a2", opacity=0.8),
-            customdata=list(zip(unmonitored["municipal_id"], ["muni"] * len(unmonitored))),
-            text=unmonitored["address"], hovertemplate="Catch basin #%{customdata[0]}<br>%{text}<br>No sensor<extra></extra>"))
+        groups = (list(data_store.PRIORITY)[::-1] if by_priority else [None])   # highest priority drawn on top
+        for level in groups:
+            g = unmonitored if level is None else unmonitored[unmonitored["priority_level"] == level]
+            _, color, size, _ = data_store.PRIORITY[level] if level else (None, "#a9a8a2", 6, None)
+            pilot_txt = [f"<br>⭐ Pilot site {int(ps)} · {role}" if pd.notna(ps) else ""
+                         for ps, role in zip(g["pilot_site"], g["pilot_role"])]
+            fig.add_trace(go.Scattermap(
+                lat=g["latitude"], lon=g["longitude"], mode="markers", name=level or "No sensor",
+                marker=dict(size=size, color=color, opacity=0.9),
+                customdata=list(zip(g["municipal_id"], ["muni"] * len(g), g["tier_label"].fillna(""), pilot_txt)),
+                text=g["address"],
+                hovertemplate="Catch basin #%{customdata[0]}<br>%{text}<br>%{customdata[2]}%{customdata[3]}"
+                              "<extra>No sensor</extra>"))
     if not shown.empty:
         shown["size"] = shown["category"].map(lambda c: cats[c]["size"])
         shown["kind"] = "basin"
@@ -146,17 +168,23 @@ with map_col:
         src = df[df["basin_id"] == picked[1]] if picked[0] == "basin" else registry[registry["municipal_id"] == picked[1]]
         if not src.empty:
             fig.add_trace(go.Scattermap(lat=src["latitude"], lon=src["longitude"], mode="markers", hoverinfo="skip",
-                                        marker=dict(size=34, color="#0b2d5b", opacity=0.25), showlegend=False))
+                                        marker=dict(size=34, color="#0b2d5b", opacity=0.25), showlegend=False,
+                                        customdata=[(picked[1], picked[0])]))
     layers = [{"sourcetype": "raster", "source": [weather.RADAR_TILES], "opacity": 0.55, "below": "traces"}] if radar else []
     fig.update_layout(map=dict(style="carto-positron" if street_map else "white-bg", center=center, zoom=zoom,
                                layers=layers),
                       margin=dict(l=0, r=0, t=0, b=0), showlegend=False, height=560)
     st.plotly_chart(fig, width="stretch", on_select=pick_from_map, selection_mode="points", key="map")
+    if by_priority and show_grey:
+        st.html('<div class="fs-muted" style="font-size:0.85rem">Pilot priority (basins without a sensor): ' + " · ".join(
+            f'<span style="color:{c}">●</span> {lvl} ({legend})' for lvl, (_, c, _, legend) in data_store.PRIORITY.items())
+            + (" · ◎ ringed = pilot site" if show_pilots else "") + "</div>")
 
 with card_col:
     if not picked:
         st.markdown("**Click a dot, or search a basin.**")
-        st.caption("Grey dots: catch basins without a sensor yet. Click one to attach a sensor.")
+        st.caption("Dots without a sensor are coloured by pilot priority (purple = highest). Click one to see why, "
+                   "or to attach a sensor.")
         top = df[df["category"].isin(["Urgent", "Inspect", "Offline"])].head(6)
         if not top.empty:
             st.markdown("**Needs attention**")
@@ -181,9 +209,19 @@ with card_col:
             m = m.iloc[0]
             installed = m.get("install_date") if isinstance(m.get("install_date"), str) and m.get("install_date") \
                 else "unknown"
-            st.html(ui.dispatch_card("no_data", "+", "City catch basin · no sensor", f"#{m['municipal_id']}",
-                                     [("Address", m["address"]), ("Type", m.get("basin_type", "")),
-                                      ("Installed", installed), ("Owner", m.get("owner", ""))]))
+            rows = [("Address", m["address"]), ("Type", m.get("basin_type", "")), ("Installed", installed)]
+            if pd.notna(m.get("tier_label")):
+                low = ("elevation unknown" if m.get("elevation_known") != True              # noqa: E712 (NaN-safe)
+                       else f"yes, {m['below_neighbours_m']:.2f} m below its neighbours" if m.get("low_point") == True
+                       else "no")
+                score = f" · score {m['score']:.2f}" if pd.notna(m.get("score")) else ""
+                rows += [("Priority", f"{m['priority_level']} (tier {m['tier']}){score}"
+                          if m.get("tier") not in (None, "–") and pd.notna(m.get("tier")) else m["priority_level"]),
+                         ("Catchment", f"~{m['catchment_m2']:,.0f} m² (est.)" if pd.notna(m.get("catchment_m2")) else "—"),
+                         ("Low point", low), ("Sensor fit", str(m.get("compatibility", "—")).split(":")[0])]
+                if pd.notna(m.get("pilot_site")):
+                    rows.append(("Pilot site", f"⭐ Site {int(m['pilot_site'])} · {m['pilot_role']}"))
+            st.html(ui.dispatch_card("no_data", "+", "City catch basin · no sensor", f"#{m['municipal_id']}", rows))
             if st.button("+ Attach a DrainShield sensor to this basin", type="primary", width="stretch"):
                 st.session_state["prefill"] = {"municipal_id": m["municipal_id"], "address": m["address"],
                                                "latitude": float(m["latitude"]), "longitude": float(m["longitude"])}
@@ -215,13 +253,38 @@ else:
         st.switch_page("dashboard.py")
 
 # ---------------------------------------------------------------------------
+# PILOT PLAN (from the prioritization)
+# ---------------------------------------------------------------------------
+if not pilots.empty:
+    with st.expander(f"⭐ Proposed pilot: {pilots['pilot_site'].nunique()} sites, {len(pilots)} basins"):
+        st.caption("Each site = one **anchor** (top-ranked basin) + two **neighbours** used as controls, so a clog "
+                   "can be told apart from the whole street being overloaded. Ranking from catchment area × local "
+                   "low point: provisional, to check on site and against Dorval's known flood sectors.")
+        plan = pilots.sort_values(["pilot_site", "pilot_role"]).assign(
+            site=pilots["pilot_site"].astype(int),
+            sensor=pilots["municipal_id"].isin(attached).map({True: "✅ installed", False: ""}))
+        cols = {"site": "Site", "pilot_role": "Role", "municipal_id": "City #", "address": "Address",
+                "tier_label": "Tier", "score": "Score", "catchment_m2": "Catchment (m²)",
+                "below_neighbours_m": "Below neighbours (m)", "sensor": "Sensor"}
+        sel = st.dataframe(plan[list(cols)].rename(columns=cols), hide_index=True, width="stretch",
+                           on_select="rerun", selection_mode="single-row", key="pilot_table")
+        if sel.selection.rows:
+            st.session_state["picked"] = ("muni", plan.iloc[sel.selection.rows[0]]["municipal_id"])
+            st.rerun()
+        st.caption("Click a row to show it on the map.")
+
+# ---------------------------------------------------------------------------
 # THE FULL CITY REGISTRY
 # ---------------------------------------------------------------------------
 with st.expander(f"All {len(registry):,} catch basins (Ville de Montréal open data)"):
     full = registry.assign(sensor=registry["municipal_id"].isin(attached).map({True: "yes", False: ""}))
-    st.dataframe(full[["municipal_id", "address", "basin_type", "install_date", "sensor", "latitude", "longitude"]]
-                 .rename(columns={"municipal_id": "City #", "address": "Address", "basin_type": "Type",
-                                  "install_date": "Installed", "sensor": "Sensor"}),
-                 hide_index=True, width="stretch", height=360)
+    if "score" in full:
+        full = full.sort_values(["score", "catchment_m2"], ascending=False, na_position="last")
+    cols = {"municipal_id": "City #", "address": "Address", "priority_level": "Priority", "tier_label": "Tier",
+            "score": "Score", "catchment_m2": "Catchment (m²)", "below_neighbours_m": "Below neighbours (m)",
+            "compatibility": "Sensor fit", "pilot_site": "Pilot site", "basin_type": "Type", "sensor": "Sensor"}
+    cols = {k: v for k, v in cols.items() if k in full}
+    st.dataframe(full[list(cols)].rename(columns=cols), hide_index=True, width="stretch", height=360)
     st.caption("Source: Ville de Montréal, « Puisards d'égout » (ego_puisard_p.csv), every active basin owned by "
-               f"{owner}. Use the search icon at the top right of the table to find a street.")
+               f"{owner}; priority from the DrainShield prioritization (highest score first). Use the search icon "
+               "at the top right of the table to find a street.")
