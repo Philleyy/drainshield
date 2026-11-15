@@ -101,16 +101,33 @@ if not rows:
 st.html(ui.dispatch_card(b_key, b_icon, "What to do", b_head, rows))
 
 
+# One click per crew action (the spec: "Log maintenance" in one click). Details are optional, below.
+QUICK = [("Crew dispatched", "🚚 Crew sent"), ("Inspected", "👀 Inspected"),
+         ("Cleaned / vacuumed", "✅ Cleaned"), ("Obstruction found", "🪵 Obstruction"),
+         ("No issue found", "👍 No issue"), (maintenance.INSTALL, "🔧 Sensor fixed")]
+
+
+def log_action(action, sediment_mm=None, note=""):
+    maintenance.add(basin["basin_id"], now, action, sediment_mm, note)
+    st.cache_data.clear()
+    st.toast(f"Logged for {basin['basin_id']}: {action}", icon="✅")
+
+
+st.markdown("**Log what the crew did** · one click, saved right away")
+grid = st.columns(3) + st.columns(3)                 # 2 rows of 3: labels stay whole, even on a tablet
+for col, (action, label) in zip(grid, QUICK):
+    col.button(label, key=f"quick_{action}", width="stretch", help=action,
+               type="primary" if action == "Cleaned / vacuumed" else "secondary",
+               on_click=log_action, args=(action, 0 if action == "Cleaned / vacuumed" else None))
 c1, c2 = st.columns([1.6, 3])
-with c1.expander("✅ Log maintenance"):
+with c1.expander("Add details (note, sediment left, other actions)"):
     with st.form("log_form", clear_on_submit=True, border=False):
         action = st.radio("What did the crew do?", maintenance.ACTIONS, index=4)
         sed = st.number_input("If cleaned: sediment left in the sump (mm)", 0, 1000, 0, 10,
                               help="Usually 0. Used to restart the sump-fill estimate.")
         note = st.text_input("Note (optional)")
         if st.form_submit_button("Save", type="primary", width="stretch"):
-            maintenance.add(basin["basin_id"], now, action, sed if action == "Cleaned / vacuumed" else None, note)
-            st.cache_data.clear()
+            log_action(action, sed if action == "Cleaned / vacuumed" else None, note)
             st.rerun()
 c2.page_link("network.py", label="← Back to the network map")
 st.write("")
@@ -126,7 +143,7 @@ if w and w["diagnosis"] == "outlet" and w["status"] != "ok":
                                 f"{w['capacity_pct']:.0f}% capacity")
 grate_blocked = bool(w and w["diagnosis"] == "grate")
 
-left, right = st.columns([1.45, 1], gap="large", vertical_alignment="center")
+left, right = st.columns([1.8, 1], gap="large", vertical_alignment="center")
 with left:
     stale = S["live"] == "no_data"
     ui.svg_image(basin_svg(basin, S["level_cm"], S["at_sensor_limit"], S["raining_now"], stale,
@@ -136,13 +153,21 @@ with left:
                "the sump and any restriction are **inferred** from how the basin behaves in storms.")
 
 with right:
+    # Headline = the state in words. A big "1.40 m" read like 1.4 m of water; the depth is now the detail.
     if S["level_cm"] is None or stale:
-        st.html(ui.value_card("no_data", "Live water depth", "Unknown", live["value"]))
+        st.html(ui.value_card("no_data", "Water level now", "Unknown", live["value"]))
     else:
-        depth = proc.depth_below_street_m(basin, S["level_cm"])
-        value = (f"≤ {proc.closest_readable_m(basin):.2f} m" if S["at_sensor_limit"] else f"{depth:.2f} m")
-        sub = "below street · " + ("above the sensor's range" if S["at_sensor_limit"] else live["title"].lower())
-        st.html(ui.value_card(live_key, "Live water depth", value, sub))
+        state = proc.LIVE[S["live"]]["label"]
+        if S["at_sensor_limit"]:
+            sub = f"Water surface ≤ {proc.closest_readable_m(basin):.2f} m below the street (above the sensor's range)"
+        else:
+            depth = proc.depth_below_street_m(basin, S["level_cm"])
+            above = S["level_cm"] - proc.DRAINED_WITHIN_CM
+            where = (f"{S['level_cm']:.0f} cm above the outlet" if above > 0 else "at the outlet (resting level)")
+            sub = f"Water surface {depth:.2f} m below the street · {where}"
+        if S["live"] == "normal" and "(" in live["title"]:
+            sub += f" · {live['title'].split('(')[1].rstrip(')')}"
+        st.html(ui.value_card(live_key, "Water level now", state, sub))
     w_ = S.get("worst_event")
     fill = f"Est. sump fill: ~{S['sediment_pct']:.0f}%"
     if stale:

@@ -246,10 +246,16 @@ else:
     if eng:
         cols["battery_pct"] = "Battery %"
         cols["reading"] = "Reading mode"
+    else:                                   # crew: fewer columns so priority and action are never cut off
+        for k in ("trend", "recovery"):
+            cols.pop(k)
     table = shown.assign(status=shown["category"].map(lambda c: cats[c]["emoji"]) + " " + shown["priority"])
     table = table[list(cols)].rename(columns=cols)
     picked_row = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun",
-                              selection_mode="single-row", key="dispatch")
+                              selection_mode="single-row", key="dispatch",
+                              column_config={"Basin": st.column_config.TextColumn(width="small"),
+                                             "Priority": st.column_config.TextColumn(width="medium"),
+                                             "Recommended action": st.column_config.TextColumn(width="large")})
     if picked_row.selection.rows:
         data_store.select_basin(table.iloc[picked_row.selection.rows[0]]["Basin"])
         st.switch_page("dashboard.py")

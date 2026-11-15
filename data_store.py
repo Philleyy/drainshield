@@ -260,8 +260,8 @@ def status_for(key, basin_id, when):
 CATEGORIES = {
     "Urgent": {"color": "#d03b3b", "size": 22, "rank": 0, "emoji": "🔴", "tint": "#f9e3e3", "text": "#b52a2a"},
     "Inspect": {"color": "#ec835a", "size": 16, "rank": 1, "emoji": "🟠", "tint": "#fcebe3", "text": "#b4471c"},
-    "Normal": {"color": "#0ca30c", "size": 13, "rank": 2, "emoji": "🟢", "tint": "#e9f6e9", "text": "#0a7a0a"},
-    "Offline": {"color": "#55534e", "size": 13, "rank": 3, "emoji": "⚫", "tint": "#efefec", "text": "#52514e"},
+    "Normal": {"color": "#0ca30c", "size": 13, "rank": 3, "emoji": "🟢", "tint": "#e9f6e9", "text": "#0a7a0a"},
+    "Offline": {"color": "#55534e", "size": 13, "rank": 2, "emoji": "⚫", "tint": "#efefec", "text": "#52514e"},
 }
 
 

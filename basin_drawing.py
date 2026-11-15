@@ -119,10 +119,10 @@ def basin_svg(b, level_cm=None, at_limit=False, raining=False, stale=False,
         if sed > 0.5:   # ESTIMATED sediment: dashed outline = inferred, not measured
             add(f'<rect x="{x_in_l + 2}" y="{y(sed)}" width="{w - 4}" height="{y(0) - y(sed)}" fill="{SEDIMENT}" '
                 f'fill-opacity="0.55" stroke="{SEDIMENT}" stroke-width="2" stroke-dasharray="6 4"/>')
-            add(f'<text x="{x_in_l + 6}" y="{min(y(sed / 2) + 6, y(0) - 6)}" font-size="17" fill="#ffffff" '
+            add(f'<text x="{x_in_l + 6}" y="{min(y(sed / 2) + 6, y(0) - 6)}" font-size="20" fill="#ffffff" '
                 f'font-weight="700">est. sediment ~{100 * sed / sump:.0f}%</text>')
         else:
-            add(f'<text x="{x_in_l + 6}" y="{y(sump / 2) + 5}" font-size="19" fill="#ffffff" font-weight="700">'
+            add(f'<text x="{x_in_l + 6}" y="{y(sump / 2) + 5}" font-size="22" fill="#ffffff" font-weight="700">'
                 f'sump: not visible</text>')
     if at_limit and not stale:
         add(f'<rect x="{x_in_l}" y="{y(G) + 4}" width="{w}" height="{y(level_floor) - y(G) - 4}" fill="url(#above)"/>')
@@ -188,7 +188,7 @@ def basin_svg(b, level_cm=None, at_limit=False, raining=False, stale=False,
         txt = f"≤ {depth:.2f} m" if at_limit else f"{depth:.2f} m"
         ly = min(y(level_floor) - 10, y(inv + 4) - 10)
         add(f'<text x="{x_in_l + 30}" y="{ly}" font-size="32" font-weight="700" fill="{TEXT}">{txt}</text>')
-        add(f'<text x="{x_in_l + 30}" y="{ly + 17}" font-size="18" fill="{TEXT}">below street</text>'
+        add(f'<text x="{x_in_l + 30}" y="{ly + 21}" font-size="22" fill="{TEXT}">below street</text>'
             if y(level_floor) - y(sump) > 40 else "")
     else:
         add(f'<text x="{(x_in_l + x_in_r) / 2}" y="{y(inv + 25)}" font-size="54" font-weight="700" '
@@ -202,7 +202,7 @@ def basin_svg(b, level_cm=None, at_limit=False, raining=False, stale=False,
              (inv + high_top, G, ZONES["backup"], "Backing up")]
     for lo, hi, zc, name in zones:
         add(f'<rect x="{gx}" y="{y(hi)}" width="13" height="{y(lo) - y(hi)}" fill="{zc}"/>')
-        add(f'<text x="{gx - 8}" y="{(y(lo) + y(hi)) / 2 + 5}" font-size="23" fill="{TEXT}" text-anchor="end">{name}</text>')
+        add(f'<text x="{gx - 8}" y="{(y(lo) + y(hi)) / 2 + 5}" font-size="27" fill="{TEXT}" text-anchor="end">{name}</text>')
     add(f'<path d="M{gx + 15},{y(level_floor)} l11,-7 v14 z" fill="{TEXT}"/>')
 
     # ---------- reference depths (right) ----------
@@ -220,18 +220,18 @@ def basin_svg(b, level_cm=None, at_limit=False, raining=False, stale=False,
     lx = stub_end + 12
     last_y = -100
     for h, text, tc, extra in sorted(refs, key=lambda r: -r[0]):
-        ty = max(y(h) + 7, last_y + 27)
+        ty = max(y(h) + 8, last_y + 31)
         add(f'<line x1="{x_out_r}" x2="{lx - 4}" y1="{y(h)}" y2="{y(h)}" stroke="{tc}" stroke-width="1" '
             f'stroke-dasharray="2 2"/>')
-        if abs(ty - (y(h) + 7)) > 2:
+        if abs(ty - (y(h) + 8)) > 2:
             add(f'<line x1="{lx - 4}" x2="{lx}" y1="{y(h)}" y2="{ty - 5}" stroke="{tc}" stroke-width="1"/>')
-        add(f'<text x="{lx + 2}" y="{ty}" font-size="23" fill="{tc}">{text}</text>')
+        add(f'<text x="{lx + 2}" y="{ty}" font-size="27" fill="{tc}">{text}</text>')
         last_y = ty
         if extra:
             for k, part in enumerate(extra[1].split(": ")):
-                add(f'<text x="{lx + 2}" y="{ty + 24 * (k + 1)}" font-size="20" font-weight="700" '
+                add(f'<text x="{lx + 2}" y="{ty + 28 * (k + 1)}" font-size="24" font-weight="700" '
                     f'fill="{extra[0]}">{"! " if k == 0 else "  "}{part}</text>')
-            last_y = ty + 24 * len(extra[1].split(": "))
+            last_y = ty + 28 * len(extra[1].split(": "))
     if raining:
         for k in range(14):
             rx = x_out_l - 55 + k * 22
