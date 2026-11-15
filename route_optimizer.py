@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+import net
+
 OSRM_URL = "https://router.project-osrm.org"
 USER_AGENT = "DrainShield-student-prototype/0.3 (McGill)"
 TIMEOUT_S = 8
@@ -74,7 +76,7 @@ def straight_line_matrix(points):
 
 def _get_json(url, opener=None):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with (opener or urllib.request.urlopen)(req, timeout=TIMEOUT_S) as resp:
+    with (opener or net.urlopen)(req, timeout=TIMEOUT_S) as resp:
         return json.load(resp)
 
 

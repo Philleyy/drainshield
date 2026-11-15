@@ -37,6 +37,7 @@ import urllib.request
 import pandas as pd
 
 import maintenance
+import net
 import processing as proc
 
 DATA = "data"
@@ -138,7 +139,7 @@ def write_json(path, data):
 
 def fetch_forecast(lat, lon):
     try:
-        with urllib.request.urlopen(OPEN_METEO.format(lat=round(lat, 3), lon=round(lon, 3)), timeout=8) as r:
+        with net.urlopen(OPEN_METEO.format(lat=round(lat, 3), lon=round(lon, 3)), timeout=8) as r:
             h = json.load(r)["hourly"]
         return pd.DataFrame({"timestamp": pd.to_datetime(h["time"]),
                              "rain_mm": pd.to_numeric(pd.Series(h["precipitation"]), errors="coerce").fillna(0)})

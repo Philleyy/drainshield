@@ -11,10 +11,11 @@ Rain forecasts, for the "inspect before the storm" logic.
 """
 
 import json
-import urllib.request
 
 import pandas as pd
 import streamlit as st
+
+import net
 
 HEAVY_RAIN_MM = 15          # 15 mm or more in the next 12 h counts as heavy rain
 FORECAST_HOURS = 12
@@ -31,14 +32,19 @@ def empty_rain():
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
+def _download_rain(lat, lon):
+    """Cached for 30 min. Raises when offline, so a failed download is not cached (retried next refresh)."""
+    with net.urlopen(OPEN_METEO.format(lat=lat, lon=lon), timeout=8) as response:
+        data = json.load(response)["hourly"]
+    rain = pd.DataFrame({"timestamp": pd.to_datetime(data["time"]),
+                         "rain_mm": pd.to_numeric(pd.Series(data["precipitation"]), errors="coerce")})
+    return rain.fillna(0.0)
+
+
 def rain_series(lat, lon):
     """Hourly rain (mm in each hour): past 7 days + next 2 days. Empty table if offline."""
     try:
-        with urllib.request.urlopen(OPEN_METEO.format(lat=lat, lon=lon), timeout=8) as response:
-            data = json.load(response)["hourly"]
-        rain = pd.DataFrame({"timestamp": pd.to_datetime(data["time"]),
-                             "rain_mm": pd.to_numeric(pd.Series(data["precipitation"]), errors="coerce")})
-        return rain.fillna(0.0)
+        return _download_rain(lat, lon)
     except Exception:
         return empty_rain()
 
