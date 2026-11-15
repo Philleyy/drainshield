@@ -12,6 +12,10 @@ Loads everything the dashboard needs and keeps the selected basin shared between
 
 Rain comes from the real Environment Canada GEM model (past 7 days + forecast) through
 Open-Meteo. Without internet, the rain-based features simply switch off.
+
+PITCH DEMO MODE (sidebar "Data: Pitch demo"): the same pages read data/demo/ instead (a scripted 24-hour day,
+demo_scenario.py), "now" is the demo clock, readings appear when they were received, and the rain is the
+forecast Environment Canada had issued by that minute.
 """
 
 import json
@@ -20,6 +24,7 @@ import os
 import pandas as pd
 import streamlit as st
 
+import demo_scenario
 import maintenance
 import processing as proc
 import weather
@@ -33,6 +38,38 @@ SETTINGS_FILE = os.path.join(DATA, "sensor_settings.json")
 STATUS_FILE = os.path.join(DATA, "sensor_status.json")
 READING_COLUMNS = ["basin_id", "timestamp", "distance_cm", "battery_v"]
 DEFAULT_INTERVAL_S = 5
+LIVE_LOG_FILE = maintenance.LOG_FILE
+DEMO_LABEL = "Pitch demo"
+MODE_EVERY = {"DRY": "30 min", "WATCH": "5 min", "STORM": "60 s"}
+REC_ICED = 0x08
+
+
+def demo_on():
+    """True when the sidebar's Data switch is on "Pitch demo"."""
+    try:
+        return st.session_state.get("data_mode") == DEMO_LABEL
+    except Exception:                                   # outside a Streamlit run
+        return False
+
+
+def files():
+    """The files the dashboard reads right now (the real ones, or the demo's)."""
+    if demo_on():
+        f = demo_scenario.FILES
+        out = {"monitored": f["monitored"], "live": f["live"], "settings": f["settings"], "status": f["status"],
+               "log": f["log"]}
+    else:
+        out = {"monitored": MONITORED_FILE, "live": LIVE_FILE, "settings": SETTINGS_FILE, "status": STATUS_FILE,
+               "log": LIVE_LOG_FILE}
+    maintenance.LOG_FILE = out["log"]                 # the maintenance log follows the same switch
+    return out
+
+
+def demo_minute():
+    try:
+        return int(st.session_state.get("demo_t", 0))
+    except Exception:
+        return 0
 
 
 def _mtime(path):
@@ -40,38 +77,65 @@ def _mtime(path):
 
 
 def now():
-    """The current local time (the dashboard is live: no more replay)."""
+    """The current local time, or the demo clock in Pitch demo mode."""
+    if demo_on():
+        return demo_scenario.DAY + pd.Timedelta(minutes=demo_minute())
     return pd.Timestamp.now().floor("s")
 
 
 def data_key():
-    """Changes whenever a basin file or the readings change (used to refresh caches)."""
-    return (_mtime(MONITORED_FILE), _mtime(LIVE_FILE), _mtime(REGISTRY_FILE), _mtime(maintenance.LOG_FILE))
+    """Changes whenever a basin file or the readings change (used to refresh caches), or the demo clock moves."""
+    f = files()
+    return ((f["monitored"], f["live"], f["log"]),
+            (_mtime(f["monitored"]), _mtime(f["live"]), _mtime(REGISTRY_FILE), _mtime(f["log"])),
+            now() if demo_on() else None)
 
 
-@st.cache_data(show_spinner=False)
-def _load(key):
-    if not os.path.exists(MONITORED_FILE) and os.path.exists(OLD_USER_FILE):
+@st.cache_data(show_spinner=False, max_entries=4)
+def _load_full(paths, mtimes):
+    monitored, live, log_file = paths
+    if monitored == MONITORED_FILE and not os.path.exists(MONITORED_FILE) and os.path.exists(OLD_USER_FILE):
         os.replace(OLD_USER_FILE, MONITORED_FILE)                     # carry over basins added before
-    basins = pd.read_csv(MONITORED_FILE, dtype={"municipal_id": str}) if os.path.exists(MONITORED_FILE) \
+    basins = pd.read_csv(monitored, dtype={"municipal_id": str}) if os.path.exists(monitored) \
         else pd.DataFrame(columns=["basin_id", "municipal_id", "latitude", "longitude"])
-    readings = (pd.read_csv(LIVE_FILE, parse_dates=["timestamp"]) if os.path.exists(LIVE_FILE)
+    readings = (pd.read_csv(live, parse_dates=["timestamp"]) if os.path.exists(live)
                 else pd.DataFrame(columns=READING_COLUMNS))
     readings["timestamp"] = pd.to_datetime(readings["timestamp"])
+    if "received" in readings:                                        # demo files: when it reached the server
+        readings["received"] = pd.to_datetime(readings["received"])
     readings["distance_cm"] = pd.to_numeric(readings["distance_cm"], errors="coerce")
     readings["battery_v"] = pd.to_numeric(readings["battery_v"], errors="coerce")
     if not basins.empty and "sensor_height_cm" in basins:      # learn each sensor's height from the water
+        maintenance.LOG_FILE = log_file
         log = maintenance.load()
         basins = pd.DataFrame([proc.calibrate(b, readings, maintenance.last_install(log, b["basin_id"]))
                                for _, b in basins.iterrows()]).reset_index(drop=True)
     return basins, readings
 
 
+@st.cache_data(show_spinner=False, max_entries=8)
+def _load(key):
+    paths, mtimes, clock = key
+    basins, readings = _load_full(paths, mtimes)
+    if clock is not None and "received" in readings:                  # demo: only what had arrived by then
+        readings = readings[readings["received"] <= clock]
+    return basins, readings
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _demo_rain(clock, mtime):
+    actual, minute, forecasts = demo_scenario.load_rain()
+    return demo_scenario.rain_as_of(clock, actual, forecasts, minute)
+
+
 def load_all():
     """(monitored basins, sensor readings, rain, rain events, truth) — truth is always empty now."""
     basins, readings = _load(data_key())
-    lat, lon = center()
-    rain = weather.rain_series(round(lat, 3), round(lon, 3))
+    if demo_on():
+        rain = _demo_rain(now(), _mtime(demo_scenario.FILES["rain"]))
+    else:
+        lat, lon = center()
+        rain = weather.rain_series(round(lat, 3), round(lon, 3))
     return basins, readings, rain, proc.rain_events(rain), pd.DataFrame()
 
 
@@ -134,16 +198,36 @@ def levels_for(key, basin_id):
 # Maintenance log and status
 # ---------------------------------------------------------------------------
 def log_key():
-    return _mtime(maintenance.LOG_FILE)
+    f = files()["log"]
+    return (f, _mtime(f))
 
 
 @st.cache_data(show_spinner=False)
 def _log(key):
+    maintenance.LOG_FILE = key[0]
     return maintenance.load()
 
 
 def entries_for(basin_id, when):
     return maintenance.for_basin(_log(log_key()), basin_id, when)
+
+
+def last_reading_info(basin_id, when):
+    """What the sensor said in its LAST message (even one without a level): flags, mode, temperature.
+    Demo files carry them per reading; live, lora_bridge.py writes them to sensor_status.json."""
+    _, readings, *_ = load_all()
+    info = {"iced": False, "mode": None, "temp_c": None, "received": None}
+    if "flags" in readings:
+        r = readings[(readings["basin_id"] == basin_id) & (readings["timestamp"] <= when)]
+        if not r.empty:
+            last = r.iloc[-1]
+            info.update(iced=bool(int(last["flags"]) & REC_ICED), mode=last.get("mode"),
+                        temp_c=last.get("temp_c"), received=last["timestamp"])
+            return info
+    s = sensor_status().get(basin_id, {})
+    if s:
+        info.update(iced="sensor iced" in str(s.get("flags", "")), mode=s.get("mode"), temp_c=s.get("temp_c"))
+    return info
 
 
 def status_for(key, basin_id, when):
@@ -155,6 +239,19 @@ def status_for(key, basin_id, when):
                           reset=maintenance.last_reset(entries))
     S["lifecycle"] = maintenance.lifecycle(S, entries)
     S["entries"] = entries
+    info = last_reading_info(basin_id, when)
+    S["reading_mode"], S["temp_c"] = info["mode"], info["temp_c"]
+    S["iced"] = info["iced"] and info["received"] is not None and \
+        (when - info["received"]).total_seconds() <= proc.NO_DATA_AFTER_MIN * 60
+    if S["live"] in ("backing_up", "high"):                            # emergency: has a crew been sent?
+        sent = entries[(entries["time"] >= when - pd.Timedelta(hours=3)) & (entries["action"] == "Crew dispatched")] \
+            if not entries.empty else entries
+        S["lifecycle"] = "Verified / crew dispatched" if not sent.empty else "Detected (unverified)"
+    if S["status"] == "no_data" or S["iced"]:                          # sensor problem: has a crew been sent?
+        since = S["last_reading"] if S["last_reading"] is not None else when - pd.Timedelta(days=1)
+        sent = entries[(entries["time"] >= since) & (entries["action"] == "Crew dispatched")] \
+            if not entries.empty else entries
+        S["lifecycle"] = "Verified / crew dispatched" if not sent.empty else "Detected (unverified)"
     return S
 
 
@@ -172,10 +269,15 @@ def triage(b, S, forecast):
     """(category, priority label, recommended action) for one monitored basin."""
     live = proc.live_summary(b, S)
     _, _, _, action = proc.drainage_health(b, S)
+    if S.get("iced"):                                     # a sensor state, never an infrastructure alarm
+        return "Offline", "Sensor iced (no echo below 0 °C)", \
+            "Usually clears as it warms up: check the sensor face if it lasts 6 h+"
     if S["live"] == "no_data" or S["status"] == "no_data":
         return "Offline", "Sensor offline", "Inspect the sensor"
-    if S["live"] in ("backing_up", "high"):
+    if S["live"] == "backing_up":
         return "Urgent", "Flooding / backing up now", live["action"]
+    if S["live"] == "high":
+        return "Urgent", "Not draining after the rain", live["action"]
     if S["status"] in ("urgent", "clean_soon", "watch") and weather.is_heavy(forecast):
         return "Urgent", "Inspect before storm", "Clean it before the rain starts"
     if S["status"] in ("urgent", "clean_soon", "watch"):
@@ -212,9 +314,12 @@ def network_status(key, lkey, when):
             "updated": ago(S["minutes_since_reading"]),
             "online": S["live"] != "no_data",
             "battery_pct": proc.battery_pct(S["battery_v"]),
+            "reading": (f"{S['reading_mode']} · every {MODE_EVERY[S['reading_mode']]}"
+                        if S.get("reading_mode") in MODE_EVERY else ""),
         })
     cols = ["basin_id", "municipal_id", "address", "latitude", "longitude", "category", "priority", "rank",
-            "live", "water", "trend", "recovery", "drainage", "action", "issue", "updated", "online", "battery_pct"]
+            "live", "water", "trend", "recovery", "drainage", "action", "issue", "updated", "online", "battery_pct",
+            "reading"]
     if not rows:
         return pd.DataFrame(columns=cols)
     return pd.DataFrame(rows).sort_values(["rank", "basin_id"]).reset_index(drop=True)
@@ -245,22 +350,23 @@ def select_basin(basin_id):
 # Monitored basins
 # ---------------------------------------------------------------------------
 def save_monitored_basin(row, replace=False):
-    """Add (or replace) one basin in data/monitored_basins.csv."""
-    os.makedirs(DATA, exist_ok=True)
-    df = pd.read_csv(MONITORED_FILE, dtype={"municipal_id": str}) if os.path.exists(MONITORED_FILE) \
-        else pd.DataFrame()
+    """Add (or replace) one basin in data/monitored_basins.csv (the demo's copy in Pitch demo mode)."""
+    path = files()["monitored"]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    df = pd.read_csv(path, dtype={"municipal_id": str}) if os.path.exists(path) else pd.DataFrame()
     if not df.empty and row["basin_id"] in set(df["basin_id"]):
         if not replace:
             raise ValueError("exists")
         df = df[df["basin_id"] != row["basin_id"]]
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(MONITORED_FILE, index=False)
+    df.to_csv(path, index=False)
     st.cache_data.clear()
 
 
 def delete_monitored_basin(basin_id):
-    df = pd.read_csv(MONITORED_FILE, dtype={"municipal_id": str})
-    df[df["basin_id"] != basin_id].to_csv(MONITORED_FILE, index=False)
+    path = files()["monitored"]
+    df = pd.read_csv(path, dtype={"municipal_id": str})
+    df[df["basin_id"] != basin_id].to_csv(path, index=False)
     st.cache_data.clear()
 
 
@@ -276,14 +382,15 @@ def _read_json(path):
 
 
 def sensor_settings():
-    return _read_json(SETTINGS_FILE)
+    return _read_json(files()["settings"])
 
 
 def set_interval(sensor_key, seconds):
     settings = sensor_settings()
     settings.setdefault(sensor_key, {})["interval_s"] = seconds
-    os.makedirs(DATA, exist_ok=True)
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+    path = files()["settings"]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)
 
 
@@ -292,4 +399,4 @@ def interval_for(sensor_key):
 
 
 def sensor_status():
-    return _read_json(STATUS_FILE)
+    return _read_json(files()["status"])

@@ -173,7 +173,8 @@ def calibrate(basin, readings, installed=None):
         b["cal_note"] = "waiting for readings"
         return b
     hourly = r.set_index("timestamp")["distance_cm"].resample("h").agg(["median", "min", "max", "count"])
-    steady = hourly[(hourly["count"] >= 3) & (hourly["max"] - hourly["min"] < STEADY_RANGE_CM)]
+    # 2 readings an hour is enough: in DRY mode the LoRa sensor reads only every 30 min
+    steady = hourly[(hourly["count"] >= 2) & (hourly["max"] - hourly["min"] < STEADY_RANGE_CM)]
     good = steady[(steady["median"] - nominal).abs() <= CAL_TOLERANCE_CM].head(CAL_HOURS)
     b["cal_hours"] = len(good)
     if len(good) >= CAL_MIN_HOURS:
@@ -514,7 +515,8 @@ def live_summary(basin, S):
     elif key == "high":
         action = "Water stuck high in dry weather: check within 24 h"
     else:
-        action = "Dispatch a crew now: street flooding risk"
+        action = ("Dispatch a crew now: street flooding risk. Put up slow-down / road-closed signs: passing cars "
+                  "push waves toward doors and basement windows")
         sub = subdrain_above_invert_cm(basin)
         if sub is not None and S["level_cm"] >= sub:
             action += ". Backfilling into the subdrains / road base"

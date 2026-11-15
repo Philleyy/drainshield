@@ -143,8 +143,8 @@ with more:
                      if pd.notna(r["Depth from grate (mm)"]) and pd.notna(r["Diameter (mm)"])]
 
     cfg["blind_zone_mm"] = st.number_input("Sensor blind zone (mm)", 20, 600, bm.DEFAULT_BLIND_ZONE_MM, 10,
-                                           key="blind", help="The sensor can't measure anything closer. ~250 mm "
-                                                             "for JSN-SR04T-type waterproof ultrasonic sensors.")
+                                           key="blind", help="The sensor can't measure anything closer: 30 mm for "
+                                                             "the A02YYUW, ~250 mm for JSN-SR04T-type sensors.")
 
     st.markdown("**For the sediment estimate**")
     st.caption("The sensor can't see under water, so sump fill is estimated from rain and the area draining "

@@ -127,3 +127,13 @@ def device_pill(online, battery_pct, minutes_since, battery_key):
 def count_tile(color, tint, text_color, n, label):
     return (f'<div class="fs-count" style="--c:{color};--t:{text_color};--tint:{tint}">'
             f'<div class="n">{n}</div><div class="l">{label}</div></div>')
+
+
+def fit_zoom(lats, lons, height_px, width_px=900, margin=0.8):
+    """Map zoom level that shows every point (web-mercator tiles are 256 px; keep a margin around them)."""
+    import math
+    lat_span = max(max(lats) - min(lats), 0.002)
+    lon_span = max(max(lons) - min(lons), 0.002)
+    z_lon = math.log2(360 * width_px * margin / (256 * lon_span))
+    z_lat = math.log2(360 * height_px * margin / (256 * lat_span * 1.42))   # 1 deg lat ~ 1.42 deg lon at 45 N
+    return max(min(z_lon, z_lat, 16), 9)

@@ -174,7 +174,8 @@ with map_col:
     fig.update_layout(map=dict(style="carto-positron" if street_map else "white-bg", center=center, zoom=zoom,
                                layers=layers),
                       margin=dict(l=0, r=0, t=0, b=0), showlegend=False, height=560)
-    st.plotly_chart(fig, width="stretch", on_select=pick_from_map, selection_mode="points", key="map")
+    st.plotly_chart(fig, width="stretch", on_select=pick_from_map, selection_mode="points", key="map",
+                    config={"scrollZoom": False})
     if by_priority and show_grey:
         st.html('<div class="fs-muted" style="font-size:0.85rem">Pilot priority (basins without a sensor): ' + " · ".join(
             f'<span style="color:{c}">●</span> {lvl} ({legend})' for lvl, (_, c, _, legend) in data_store.PRIORITY.items())
@@ -244,6 +245,7 @@ else:
             "updated": "Updated"}
     if eng:
         cols["battery_pct"] = "Battery %"
+        cols["reading"] = "Reading mode"
     table = shown.assign(status=shown["category"].map(lambda c: cats[c]["emoji"]) + " " + shown["priority"])
     table = table[list(cols)].rename(columns=cols)
     picked_row = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun",

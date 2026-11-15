@@ -18,3 +18,6 @@ ego_puisard_p.csv
 
 # Written by sensor_bridge.py on each computer (which port, last reading)
 data/sensor_status.json
+
+# Pitch demo files: rebuilt by demo_scenario.py (or by the dashboard on first use)
+data/demo/

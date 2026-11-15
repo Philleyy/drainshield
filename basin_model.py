@@ -26,7 +26,7 @@ PIPE_SIZES_MM = [150, 200, 250, 300, 375, 450, 525, 600]
 SUMPS = {0: "None (0 mm)", 300: "300 mm (standard)", 500: "500 mm (deep)"}
 INLET_KINDS = ["Subdrain", "Incoming pipe"]
 DEFAULT_SENSOR_DEPTH_MM = 400
-DEFAULT_BLIND_ZONE_MM = 250
+DEFAULT_BLIND_ZONE_MM = 30     # A02YYUW datasheet: 3 cm (250 mm was the HC-SR04/JSN-SR04T class)
 
 
 def default_config():
