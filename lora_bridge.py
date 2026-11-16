@@ -33,6 +33,8 @@ import sys
 import time
 from datetime import datetime, timedelta
 
+import uploader
+
 DATA = "data"
 LIVE_FILE = os.path.join(DATA, "live_readings.csv")
 TELEMETRY_FILE = os.path.join(DATA, "node_telemetry.csv")
@@ -180,7 +182,13 @@ def wanted_modes(mapping, settings):
     return out
 
 
-def run(port, cli_map):
+def upload_rows(rows):
+    """The decoded readings, in the website's format."""
+    return [uploader.reading(r["basin_id"], r["timestamp"], r["distance_cm"], r["battery_v"], r["temp_c"], r["flags"],
+                             r["mode"], r["rssi"], r["snr"], r["node"], r["index"]) for r in rows]
+
+
+def run(port, cli_map, up=None):
     import serial
     ser = serial.serial_for_url(port, BAUD, timeout=0.5)
     print(f"Connected to {port}. Ctrl+C to stop.")
@@ -199,6 +207,8 @@ def run(port, cli_map):
                     sent_modes[node] = mode
                     print(f"   node {node} ({basin_for(node, mapping)}) -> {MODES[mode]} at its next transmission")
         raw = ser.readline().decode(errors="ignore").strip()
+        if up:
+            up.flush()                                        # retries anything waiting (every 30 s at most)
         if not raw:
             continue
         received = datetime.now()
@@ -216,6 +226,8 @@ def run(port, cli_map):
             append_rows(rows, received)
             update_status(rows)
             write_json(SEEN_FILE, seen)
+            if up:
+                up.send(upload_rows(rows))
         radio = "" if msg.get("rssi") is None else f"  {msg['rssi']:.0f} dBm"
         for r in rows:
             d = "no echo" if r["distance_cm"] is None else f"{r['distance_cm']:.1f} cm"
@@ -229,6 +241,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="DrainShield LoRa receiver -> dashboard.")
     ap.add_argument("port", nargs="?", help="serial port of the receiver, e.g. COM5 (empty = list ports)")
     ap.add_argument("--map", help="node to basin, e.g. 1=TEST-01,2=TEST-02,3=TEST-03")
+    uploader.add_arguments(ap)
     args = ap.parse_args()
     try:
         import serial  # noqa: F401
@@ -241,6 +254,6 @@ if __name__ == "__main__":
         print("\nThen run:  python lora_bridge.py COM5   (with the receiver's port)")
         sys.exit(0)
     try:
-        run(args.port, args.map)
+        run(args.port, args.map, uploader.from_args(args))
     except KeyboardInterrupt:
         print("\nStopped.")

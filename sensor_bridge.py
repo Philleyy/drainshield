@@ -32,6 +32,8 @@ import sys
 import time
 from datetime import datetime
 
+import uploader
+
 LIVE_FILE = os.path.join("data", "live_readings.csv")
 SETTINGS_FILE = os.path.join("data", "sensor_settings.json")
 STATUS_FILE = os.path.join("data", "sensor_status.json")
@@ -97,7 +99,10 @@ def parse(line):
     return None, None
 
 
-def run(port, basin, baud):
+REC_ON_USB = 0x20            # same flag the LoRa firmware uses
+
+
+def run(port, basin, baud, up=None):
     import serial
     os.makedirs("data", exist_ok=True)
     ser = serial.serial_for_url(port, baud, timeout=0.5)   # "COM3", "/dev/ttyUSB0"... (or a test URL)
@@ -124,12 +129,17 @@ def run(port, basin, baud):
 
         # 2. Read one line from the Arduino
         raw = ser.readline().decode(errors="ignore")
+        if up:
+            up.flush()                                  # retries anything waiting (every 30 s at most)
         kind, value = parse(raw) if raw else (None, None)
 
         if kind == "dist":                              # DrainShield sketch: one line = one reading
             firmware = "drainshield"
             stamp = save_reading(basin, value)
             write_status(basin, firmware=firmware, last_seen=stamp, last_distance_cm=value)
+            if up:
+                up.send([uploader.reading(basin, stamp, None if value is None else round(value, 1),
+                                          flags=REC_ON_USB, mode="USB")])
             extra = raw.strip().split(",")
             try:
                 rise = f"  water {float(extra[3]):+.2f} cm/min" if float(extra[3]) != 0 else ""
@@ -149,6 +159,9 @@ def run(port, basin, baud):
             median = statistics.median(buffer) if buffer else None
             stamp = save_reading(basin, median)
             write_status(basin, firmware=firmware, last_seen=stamp, last_distance_cm=median)
+            if up:
+                up.send([uploader.reading(basin, stamp, None if median is None else round(median, 1),
+                                          flags=REC_ON_USB, mode="USB")])
             print(f"{stamp}  {basin}  {'no echo' if median is None else f'{median:.1f} cm'}  "
                   f"(median of {len(buffer)})")
             buffer, window_start = [], time.time()
@@ -159,6 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("port", nargs="?", help="serial port, e.g. COM3 (leave empty to list ports)")
     parser.add_argument("--basin", default="TEST-01", help="basin ID these readings belong to (default TEST-01)")
     parser.add_argument("--baud", type=int, default=9600, help="must match Serial.begin() in the sketch")
+    uploader.add_arguments(parser)
     args = parser.parse_args()
     try:
         import serial  # noqa: F401
@@ -170,6 +184,6 @@ if __name__ == "__main__":
         print("\nThen run:  python sensor_bridge.py COM3 --basin TEST-01   (with your port)")
         sys.exit(0)
     try:
-        run(args.port, args.basin, args.baud)
+        run(args.port, args.basin, args.baud, uploader.from_args(args))
     except KeyboardInterrupt:
         print("\nStopped.")
