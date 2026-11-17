@@ -81,6 +81,13 @@ sensors = Table(
     Column("readings_total", Integer, nullable=False, default=0),
 )
 
+basins = Table(
+    "basins", metadata,
+    Column("basin_id", String(40), primary_key=True),
+    Column("row", Text, nullable=False),                # the as-built geometry, as basin_model.build_row() makes it (JSON)
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 maintenance = Table(
     "maintenance", metadata,
     Column("id", Integer, primary_key=True),

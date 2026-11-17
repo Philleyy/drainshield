@@ -5,10 +5,24 @@ Standard FastAPI + PostgreSQL + React, nothing specific to Ample, so it can move
 
 | Folder | What it is |
 |---|---|
-| `server/` | The Python web server (FastAPI). `main.py` = all the web addresses, `db.py` = database tables, `security.py` = passwords, sessions and upload keys, `ingest.py` = storing sensor readings. |
+| `server/` | The Python web server (FastAPI). `main.py` = all the web addresses, `db.py` = database tables, `security.py` = passwords, sessions and upload keys, `ingest.py` = storing sensor readings, `state.py` = what the pages show. |
 | `frontend/` | The React website (what you see). `src/pages/` = one file per screen, `src/styles.css` = the look (design "D"). |
 | `tests/` | Server tests: `python -m pytest -q` from this folder. |
 | `build_frontend.sh` | Builds the React site into `server/static` (the host runs it on every deploy). |
+
+## Where the pages get their numbers
+
+`server/state.py` does not redo any maths. It imports the same files the Streamlit dashboard uses
+(`processing.py`, `data_store.py`, `predictive.py`, `route_optimizer.py`, `weather.py`, `demo_scenario.py`
+in the repo root), so the website and the dashboard always agree. On the host those files sit next to
+`server/`; on a laptop they are found one folder up.
+
+* **Live** shows what sensors uploaded (database). **Pitch demo** replays the scripted 24-hour storm day;
+  both are chosen with the Data switch in the menu.
+* A pre-storm run is not a separate table: "Send to crew" writes one *Crew dispatched* log entry per stop,
+  and the crew view reads them back.
+* Nobody taps "cleaned": when the water drops well below the outlet (the vacuum truck emptied the sump),
+  the server logs the cleaning itself. The next rain draining fast is what marks it verified.
 
 ## Run it on your laptop
 

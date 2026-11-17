@@ -279,7 +279,7 @@ def analyze_events(levels, events, now, basin=None):
             drain_text = "drained right away" if minutes < 10 else f"drained in {nice_duration(minutes)}"
         else:
             minutes = (window_end - ev["end"]).total_seconds() / 60
-            drain_text = f"still not drained after {nice_duration(minutes)}"
+            drain_text = "still draining" if minutes < 10 else f"still not drained after {nice_duration(minutes)}"
         row["drain_min"] = minutes
         start_level = after["level_cm"].max() if not after.empty else peak
         if minutes >= 10 and start_level > DRAINED_WITHIN_CM:

@@ -35,7 +35,7 @@ import pandas as pd
 
 import basin_model as bm
 
-VERSION = 4
+VERSION = 5
 DEMO_DIR = os.path.join("data", "demo")
 DAY = pd.Timestamp("2026-11-17")                 # a Tuesday
 START = DAY - pd.Timedelta(days=21)
@@ -65,6 +65,8 @@ BASINS = [
     ("S9-N2", "7031070", "DS-12", "normal"),
 ]
 TABLE = {"S4-A", "S4-N1", "S4-N2"}
+VACUUMED = {"clogged": "12:45", "slowing": "13:40"}      # role: when the vacuum truck empties its sump
+SUMP_EMPTY_CM = -28                                      # water level in a just-vacuumed 30 cm sump
 
 
 def at(hhmm, day=DAY):
@@ -100,7 +102,8 @@ EVENTS = [
     ("12:10", "Sensor fixed on the way", "basin:S9-A",
      "The crew re-seats S9-A's battery connector: back online. One trip, two jobs."),
     ("12:45", "S4-A cleaned", "basin:S4-A",
-     "190 mm of sediment vacuumed out. The crew logs it on the tablet: issue resolved, back to 🟢."),
+     "190 mm of sediment vacuumed out. The sensor sees the water drop 28 cm below the outlet (sump emptied): "
+     "cleaning confirmed without anyone tapping a button. Back to 🟢."),
     ("13:20", "Radio outage", "basin:S4-N1",
      "S4-N1's radio link drops. The sensor keeps measuring every 5 min and stores every reading in its flash."),
     ("13:40", "S7-A cleaned", "basin:S7-A", "Second basin cleaned before the storm. Issue resolved."),
@@ -199,9 +202,9 @@ def rain_as_of(t, actual_hourly, forecasts=FORECASTS, minute=None):
 # ---------------------------------------------------------------------------
 def clog(role, t):
     """(rise multiplier R, time constant tau in min) at time t."""
-    if role == "clogged" and DAY - pd.Timedelta(days=10) <= t < at("12:45"):
+    if role == "clogged" and DAY - pd.Timedelta(days=10) <= t < at(VACUUMED[role]):
         return 7.0, 45.0
-    if role == "slowing" and DAY - pd.Timedelta(days=5) <= t < at("13:40"):
+    if role == "slowing" and DAY - pd.Timedelta(days=5) <= t < at(VACUUMED[role]):
         return 2.6, 12.0
     return 1.0, 4.0
 
@@ -226,6 +229,10 @@ def simulate_level(role, r, intensity):
     for k in range(1, len(idx)):
         L[k] = L[k - 1] + (R[k] * r * i[k] - L[k - 1]) / tau[k]
     level = pd.Series(L, index=idx)
+    if role in VACUUMED:                                 # emptied sump: stays low until the next rain refills it
+        t0 = at(VACUUMED[role])
+        refill = intensity[(idx > t0) & (i > 0)].index[0]
+        level[(idx >= t0) & (idx < refill)] = SUMP_EMPTY_CM
     if role == "surcharge":
         s = pd.Series([surcharge(t) for t in idx[(idx >= at("20:10")) & (idx <= at("22:05"))]],
                       index=idx[(idx >= at("20:10")) & (idx <= at("22:05"))])
@@ -314,9 +321,9 @@ def build_basins(registry):
 def scripted_log():
     rows = [(bid, INSTALLED, "Sensor installed / re-installed", None, "Pilot installation") for bid, *_ in BASINS]
     rows += [
-        ("S4-A", at("11:25"), "Crew dispatched", None, "Vacuum route sent from the dashboard"),
-        ("S7-A", at("11:25"), "Crew dispatched", None, "Vacuum route sent from the dashboard"),
-        ("S9-A", at("11:25"), "Crew dispatched", None, "Sensor check added to the route"),
+        ("S4-A", at("11:25"), "Crew dispatched", None, "Pre-storm run · stop 1 of 3 · arrive 11:45"),
+        ("S7-A", at("11:25"), "Crew dispatched", None, "Pre-storm run · stop 2 of 3 · arrive 12:09"),
+        ("S9-A", at("11:25"), "Crew dispatched", None, "Pre-storm run · stop 3 of 3 · arrive 12:35"),
         ("S9-A", at("12:10"), "Inspected", None, "Battery connector had come loose: re-seated, sensor reporting"),
         ("S4-A", at("12:45"), "Cleaned / vacuumed", 10, "190 mm of sediment removed; leaves at the trap lip"),
         ("S7-A", at("13:40"), "Cleaned / vacuumed", 10, "120 mm of sediment removed"),

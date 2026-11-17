@@ -12,13 +12,13 @@ from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, insert, select, update
 
-from . import config, ingest, security
+from . import config, ingest, security, state
 from .db import as_utc, create_tables, engine, ingest_keys, users, utcnow
 
 ROLES = ("admin", "engineering", "crew", "demo")
@@ -35,7 +35,7 @@ app = FastAPI(title="DrainShield", lifespan=lifespan, docs_url=None, redoc_url=N
 
 # ---------------------------------------------------------------------------- safety on every response
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-       "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com "
+       "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://tile.openstreetmap.org "
        "https://geo.weather.gc.ca; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 
 
@@ -49,7 +49,8 @@ async def guard(request: Request, call_next):
             return JSONResponse({"detail": "Cross-site request refused."}, status_code=403)
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "same-origin")
+    # other sites only ever learn this site's address, never the page (OpenStreetMap's map tiles require it)
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Content-Security-Policy", CSP)
     if request.url.path.startswith("/api/"):
@@ -322,6 +323,108 @@ def sensor_list(_u=Depends(current_user), conn=Depends(db)):
 @app.get("/api/sensors/{basin_id}/readings")
 def sensor_readings(basin_id: str, limit: int = 200, _u=Depends(current_user), conn=Depends(db)):
     return {"readings": ingest.recent(conn, basin_id, max(1, min(limit, 2000)))}
+
+
+# ---------------------------------------------------------------------------- the pages (state.py does the work)
+def view(u=Depends(current_user), demo: bool = False, t: int = Query(0, ge=0, le=1439)):
+    """Which data a request looks at: live, or the pitch demo at minute t of its day. Demo accounts only see the demo."""
+    return {"demo": demo or u["role"] == "demo", "minute": t, "user": u}
+
+
+def may_change(v):
+    if not v["demo"] and v["user"]["role"] == "demo":
+        raise HTTPException(403, "Demo accounts can't change live data.")
+
+
+class LogBody(BaseModel):
+    action: Literal["Crew dispatched", "Inspected", "Obstruction found", "Requires further investigation",
+                    "Cleaned / vacuumed", "No issue found", "Sensor installed / re-installed"]
+    note: str = Field(default="", max_length=300)
+    sediment_mm: float | None = Field(default=None, ge=0, le=1000)
+
+
+class RunBody(BaseModel):
+    exclude: list[str] = Field(default=[], max_length=200)
+    leave: str | None = Field(default=None, pattern=r"^\d\d:\d\d$")
+
+
+class BasinBody(BaseModel):
+    basin_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,39}$")
+    address: str = Field(default="", max_length=200)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    diameter_mm: Literal[405, 610, 915, 1220] = 610
+    invert_depth_mm: float = Field(ge=300, le=6000)
+    outlet_mm: Literal[150, 200, 250, 300, 375, 450] = 250
+    sump_mm: Literal[0, 300, 500] = 300
+    sensor_depth_mm: float = Field(default=400, ge=50, le=3000)
+    has_trap: bool = True
+
+
+@app.get("/api/demo")
+def demo_story(_u=Depends(current_user)):
+    return state.demo_story()
+
+
+@app.post("/api/demo/reset")
+def demo_reset(_u=Depends(current_user), conn=Depends(db)):
+    with state.use(conn, True):                 # builds the demo files first if they aren't there yet
+        state.demo_scenario.reset_log(True)
+    return {"ok": True}
+
+
+@app.get("/api/overview")
+def overview(v=Depends(view), conn=Depends(db)):
+    with state.use(conn, v["demo"], v["minute"]) as when:
+        return state.overview(when)
+
+
+@app.get("/api/run")
+def run(exclude: str = "", leave: str | None = Query(None, pattern=r"^\d\d:\d\d$"), v=Depends(view),
+        conn=Depends(db)):
+    with state.use(conn, v["demo"], v["minute"]) as when:
+        _, _, rain, *_ = state.data_store.load_all()
+        return state.run_state(state.network(when), rain, when, [x for x in exclude.split(",") if x], leave)
+
+
+@app.post("/api/run/send")
+def run_send(body: RunBody, v=Depends(view), conn=Depends(db)):
+    may_change(v)
+    with state.use(conn, v["demo"], v["minute"]) as when:
+        try:
+            return {"stops": state.send_run(conn, v["demo"], when, body.exclude, body.leave, v["user"]["id"])}
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+
+@app.post("/api/basins")
+def basin_save(body: BasinBody, u=Depends(current_user), conn=Depends(db)):
+    if u["role"] not in ("admin", "engineering"):
+        raise HTTPException(403, "Only administrators and engineering can add basins.")
+    try:
+        return {"warnings": state.save_basin(conn, body.model_dump())}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/basins/{basin_id}")
+def basin(basin_id: str, v=Depends(view), conn=Depends(db)):
+    with state.use(conn, v["demo"], v["minute"]) as when:
+        out = state.basin_detail(basin_id, when)
+    if out is None:
+        raise HTTPException(404, "No such basin.")
+    return out
+
+
+@app.post("/api/basins/{basin_id}/log")
+def basin_log(basin_id: str, body: LogBody, v=Depends(view), conn=Depends(db)):
+    may_change(v)
+    with state.use(conn, v["demo"], v["minute"]) as when:
+        if state.basin_detail(basin_id, when) is None:
+            raise HTTPException(404, "No such basin.")
+        state.add_log(conn, v["demo"], when, basin_id, body.action,
+                      body.sediment_mm if body.action == "Cleaned / vacuumed" else None, body.note, v["user"]["id"])
+    return {"ok": True}
 
 
 @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

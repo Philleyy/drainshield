@@ -11,6 +11,7 @@ Rain forecasts, for the "inspect before the storm" logic.
 """
 
 import json
+import time
 
 import pandas as pd
 import streamlit as st
@@ -22,6 +23,14 @@ FORECAST_HOURS = 12
 
 OPEN_METEO = ("https://api.open-meteo.com/v1/gem?latitude={lat}&longitude={lon}"
               "&hourly=precipitation&past_days=7&forecast_days=2&timezone=America%2FToronto")
+# The same Environment Canada GEM data from a second Open-Meteo server, for networks that can't reach the first
+# (the website's host can't). Whichever answered last is tried first.
+OPEN_METEO_BACKUP = ("https://historical-forecast-api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                     "&hourly=precipitation&past_days=7&forecast_days=2&models=gem_seamless"
+                     "&timezone=America%2FToronto")
+_sources = [OPEN_METEO, OPEN_METEO_BACKUP]
+RETRY_AFTER_S = 120         # after a failed download, don't make every page wait for the next 2 minutes
+_failed_at = 0.0
 RADAR_TILES = ("https://geo.weather.gc.ca/geomet?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&FORMAT=image/png"
                "&TRANSPARENT=TRUE&LAYERS=RADAR_1KM_RRAI&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256"
                "&BBOX={bbox-epsg-3857}")
@@ -34,8 +43,16 @@ def empty_rain():
 @st.cache_data(ttl=1800, show_spinner=False)
 def _download_rain(lat, lon):
     """Cached for 30 min. Raises when offline, so a failed download is not cached (retried next refresh)."""
-    with net.urlopen(OPEN_METEO.format(lat=lat, lon=lon), timeout=8) as response:
-        data = json.load(response)["hourly"]
+    for url in list(_sources):
+        try:
+            with net.urlopen(url.format(lat=lat, lon=lon), timeout=8) as response:
+                data = json.load(response)["hourly"]
+            break
+        except Exception as e:
+            error = e
+            _sources.reverse()                       # the other server goes first from now on
+    else:
+        raise error
     rain = pd.DataFrame({"timestamp": pd.to_datetime(data["time"]),
                          "rain_mm": pd.to_numeric(pd.Series(data["precipitation"]), errors="coerce")})
     return rain.fillna(0.0)
@@ -43,9 +60,13 @@ def _download_rain(lat, lon):
 
 def rain_series(lat, lon):
     """Hourly rain (mm in each hour): past 7 days + next 2 days. Empty table if offline."""
+    global _failed_at
+    if time.time() - _failed_at < RETRY_AFTER_S:
+        return empty_rain()
     try:
         return _download_rain(lat, lon)
     except Exception:
+        _failed_at = time.time()
         return empty_rain()
 
 
