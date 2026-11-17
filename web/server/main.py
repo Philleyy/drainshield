@@ -13,6 +13,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -31,6 +32,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="DrainShield", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(GZipMiddleware, minimum_size=2000)        # the city's 5,000 basins: ~300 kB -> ~70 kB
 
 
 # ---------------------------------------------------------------------------- safety on every response
@@ -350,11 +352,12 @@ class RunBody(BaseModel):
 
 class BasinBody(BaseModel):
     basin_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,39}$")
+    municipal_id: str = Field(default="", max_length=20)
     address: str = Field(default="", max_length=200)
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     diameter_mm: Literal[405, 610, 915, 1220] = 610
-    invert_depth_mm: float = Field(ge=300, le=6000)
+    invert_depth_mm: float | None = Field(default=None, ge=300, le=6000)     # empty: the sensor learns it
     outlet_mm: Literal[150, 200, 250, 300, 375, 450] = 250
     sump_mm: Literal[0, 300, 500] = 300
     sensor_depth_mm: float = Field(default=400, ge=50, le=3000)
@@ -405,6 +408,12 @@ def basin_save(body: BasinBody, u=Depends(current_user), conn=Depends(db)):
         return {"warnings": state.save_basin(conn, body.model_dump())}
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+
+@app.get("/api/city-basins")
+def city_basins(_u=Depends(current_user)):
+    with state.LOCK:
+        return state.city_basins()
 
 
 @app.get("/api/basins/{basin_id}")

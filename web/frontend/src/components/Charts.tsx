@@ -4,7 +4,7 @@ import { clock } from '../view'
 export interface RainBar { t: string; mm: number }
 // colours come from the theme (styles.css), so the charts follow light / dark
 const INK = 'var(--ink)', MUTED = 'var(--muted)', RAIN = 'var(--rain)', GRID = 'var(--grid)', AXIS = 'var(--axis)'
-const text = { fontFamily: 'Inter, sans-serif', fontSize: 12, fill: MUTED } as const
+const text = { fontSize: 12, fill: MUTED } as const
 
 /** Next 36 h of rain, hour by hour, with the dry window before it shaded. */
 export function StormTimeline({ rain, nowIso, minutesToRain, run }: { rain: RainBar[]; nowIso: string; minutesToRain: number | null; run?: { from: number; to: number; label: string } }) {
@@ -20,10 +20,6 @@ export function StormTimeline({ rain, nowIso, minutesToRain, run }: { rain: Rain
         <rect x={nowX} y={20} width={windowW} height={base - 20} fill="var(--window-tint)" />
         <text x={nowX + 8} y={38} {...text} fontWeight={600} fill="var(--window)">Safe cleaning window</text>
       </>}
-      {run && <>
-        <rect x={nowX + (run.from / 60) * step} y={base - 30} width={Math.max(((run.to - run.from) / 60) * step, 6)} height={14} rx={4} fill="var(--accent)" />
-        <text x={nowX + (run.to / 60) * step + 6} y={base - 19} {...text} fontWeight={600} fill="var(--link)">{run.label}</text>
-      </>}
       <line x1={x0} y1={(base + top) / 2} x2={W - x0} y2={(base + top) / 2} stroke={GRID} />
       <line x1={x0} y1={top} x2={W - x0} y2={top} stroke={GRID} />
       <text x={W - x0} y={top - 4} textAnchor="end" {...text} fontSize={11}>{max} mm/h</text>
@@ -38,6 +34,10 @@ export function StormTimeline({ rain, nowIso, minutesToRain, run }: { rain: Rain
           </g>
         )
       })}
+      {run && <>  {/* drawn after the rain bars so its label stays readable */}
+        <rect x={nowX + (run.from / 60) * step} y={base - 30} width={Math.max(((run.to - run.from) / 60) * step, 6)} height={14} rx={4} fill="var(--accent)" />
+        <text x={nowX + (run.to / 60) * step + 6} y={base - 19} {...text} fontWeight={600} fill="var(--link)" stroke="var(--bg)" strokeWidth={4} paintOrder="stroke">{run.label}</text>
+      </>}
       <line x1={nowX} y1={14} x2={nowX} y2={base + 6} stroke={INK} strokeWidth={2} />
       <text x={nowX} y={base + 34} textAnchor="middle" {...text} fontWeight={700} fill={INK}>Now</text>
     </svg>
@@ -86,7 +86,7 @@ export function DayChart({ rain, levels, nowIso }: { rain: RainBar[]; levels: { 
 export interface Dims { inner_width_cm: number; invert_depth_cm: number; sump_depth_cm: number; outlet_diameter_cm: number; sensor_depth_cm: number }
 
 /** The basin drawn to scale from its as-built depths, with the live water level. */
-export function CrossSection({ d, levelCm, sedimentPct, restriction }: { d: Dims; levelCm: number | null; sedimentPct: number | null; restriction?: string | null }) {
+export function CrossSection({ d, levelCm, sedimentPct, restriction, estimated }: { d: Dims; levelCm: number | null; sedimentPct: number | null; restriction?: string | null; estimated?: boolean }) {
   const s = 2.3, top = 34, floor = d.invert_depth_cm + d.sump_depth_cm
   const y = (depthCm: number) => top + depthCm * s
   const xl = 120, w = d.inner_width_cm * s, xr = xl + w, wall = 22
@@ -97,11 +97,11 @@ export function CrossSection({ d, levelCm, sedimentPct, restriction }: { d: Dims
   const label = (depth: number, t: string) => (
     <g key={t}>
       <line x1={xr + wall} y1={y(depth)} x2={lx - 6} y2={y(depth)} stroke="#9aa5ae" strokeDasharray="3 3" />
-      <text x={lx} y={y(depth) + 5} fontFamily="Inter, sans-serif" fontSize={15} fill={INK}>{t}</text>
+      <text x={lx} y={y(depth) + 5} fontSize={15} fill={INK}>{t}</text>
     </g>
   )
   return (
-    <svg viewBox={`0 0 ${lx + 300} ${y(floor) + 40}`} style={{ display: 'block', width: '100%', maxWidth: 700, height: 'auto', margin: '0 auto' }} role="img"
+    <svg viewBox={`0 0 ${lx + (estimated ? 470 : 300)} ${y(floor) + 40}`} style={{ display: 'block', width: '100%', maxWidth: 700, height: 'auto', margin: '0 auto' }} role="img"
       aria-label={`Cross-section: sensor ${m(d.sensor_depth_cm)} m below the street, outlet at ${m(d.invert_depth_cm)} m, sump floor at ${m(floor)} m. ${levelCm == null ? 'No current water reading.' : `Water ${m(Math.max(d.invert_depth_cm - levelCm, 0))} m below the street.`}`}>
       <rect x={xl - wall - 40} y={top} width={w + 2 * wall + 80} height={y(floor) - top + 20} fill="#efe8dc" />
       <rect x={xl} y={top + 8} width={w} height={y(floor) - top - 8} fill="#fbfbfc" />
@@ -116,11 +116,11 @@ export function CrossSection({ d, levelCm, sedimentPct, restriction }: { d: Dims
       <path d={`M${xl} ${y(d.sensor_depth_cm) - 10} L${xl + 24} ${y(d.sensor_depth_cm) - 10} L${xl} ${y(d.sensor_depth_cm) + 12} Z`} fill={INK} />
       {label(0, '0.00 m · Street grate')}
       {label(d.sensor_depth_cm, `−${m(d.sensor_depth_cm)} m · Sensor`)}
-      {label(d.invert_depth_cm, `−${m(d.invert_depth_cm)} m · Outlet ø${d.outlet_diameter_cm * 10}`)}
-      {label(floor, `−${m(floor)} m · Sump floor`)}
-      {waterTop != null && <text x={xl + w / 2} y={waterTop - 8} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={15} fontWeight={600} fill="#1d4aa8">−{m(Math.max(d.invert_depth_cm - (levelCm || 0), 0))} m</text>}
-      {sedH > 14 && <text x={xl + w / 2} y={y(floor) - sedH / 2 + 5} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={13} fontWeight={600} fill="#fff">sediment ~{Math.round(sedimentPct || 0)}%</text>}
-      {restriction && <text x={lx} y={y(d.invert_depth_cm) + 26} fontFamily="Inter, sans-serif" fontSize={14} fontWeight={600} fill="var(--inspect-text)">{restriction}</text>}
+      {label(d.invert_depth_cm, `${estimated ? '≈ ' : ''}−${m(d.invert_depth_cm)} m · Outlet ø${d.outlet_diameter_cm * 10}${estimated ? ' (guess until the sensor learns it)' : ''}`)}
+      {label(floor, `${estimated ? '≈ ' : ''}−${m(floor)} m · Sump floor`)}
+      {waterTop != null && <text x={xl + w / 2} y={waterTop - 8} textAnchor="middle" fontSize={15} fontWeight={600} fill="#1d4aa8">−{m(Math.max(d.invert_depth_cm - (levelCm || 0), 0))} m</text>}
+      {sedH > 14 && <text x={xl + w / 2} y={y(floor) - sedH / 2 + 5} textAnchor="middle" fontSize={13} fontWeight={600} fill="#fff">sediment ~{Math.round(sedimentPct || 0)}%</text>}
+      {restriction && <text x={lx} y={y(d.invert_depth_cm) + 26} fontSize={14} fontWeight={600} fill="var(--inspect-text)">{restriction}</text>}
     </svg>
   )
 }

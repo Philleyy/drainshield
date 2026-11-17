@@ -165,6 +165,7 @@ def calibrate(basin, readings, installed=None):
     cal_status: 'learned' or 'learning' (still using the bracket's nominal depth)."""
     b = basin.copy()
     nominal = b["sensor_height_cm"] - b["outlet_invert_cm"]          # expected distance to the invert
+    known = str(b.get("invert_known", True)) != "False"              # False: no as-built outlet depth for this basin
     r = readings[(readings["basin_id"] == b["basin_id"])].dropna(subset=["distance_cm"])
     if installed is not None:
         r = r[r["timestamp"] >= installed]
@@ -175,12 +176,16 @@ def calibrate(basin, readings, installed=None):
     hourly = r.set_index("timestamp")["distance_cm"].resample("h").agg(["median", "min", "max", "count"])
     # 2 readings an hour is enough: in DRY mode the LoRa sensor reads only every 30 min
     steady = hourly[(hourly["count"] >= 2) & (hourly["max"] - hourly["min"] < STEADY_RANGE_CM)]
-    good = steady[(steady["median"] - nominal).abs() <= CAL_TOLERANCE_CM].head(CAL_HOURS)
+    good = (steady[(steady["median"] - nominal).abs() <= CAL_TOLERANCE_CM] if known else steady).head(CAL_HOURS)
     b["cal_hours"] = len(good)
     if len(good) >= CAL_MIN_HOURS:
         learned = float(good["median"].median())
         b["sensor_height_cm"] = b["outlet_invert_cm"] + learned
-        b["sensor_depth_cm"] = b["grate_height_cm"] - b["sensor_height_cm"]
+        if known:                     # the plans fix the outlet depth: the sensor sits wherever the water says
+            b["sensor_depth_cm"] = b["grate_height_cm"] - b["sensor_height_cm"]
+        else:                         # the tape fixes the sensor depth: the outlet is where the resting water is
+            b["invert_depth_cm"] = b["sensor_depth_cm"] + learned
+            b["grate_height_cm"] = b["base_cm"] = b["sensor_height_cm"] + b["sensor_depth_cm"]
         b["cal_status"], b["cal_learned_cm"] = "learned", learned
     elif not steady.empty and good.empty:
         off = float(steady["median"].median() - nominal)

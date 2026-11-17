@@ -12,12 +12,12 @@ interface Data {
   steps: Step[] | null
   water: { key: string; title: string; text: string }
   drainage: { key: string; title: string; text: string; action: string }
-  dims: Dims; level_cm: number | null; sediment_pct: number | null; restriction: string | null
+  dims: Dims; invert_estimated: boolean; level_cm: number | null; sediment_pct: number | null; restriction: string | null
   levels: { t: string; cm: number }[]; rain: RainBar[]
   storms: { start: string; mm: number; verdict: string; status: string }[]
   log: { at: string; action: string; note: string }[]
 }
-const tone = (key: string) => ({ urgent: 'var(--urgent-text)', backing_up: 'var(--urgent-text)', danger: 'var(--urgent-text)', clean_soon: 'var(--inspect-text)', warning: 'var(--inspect-text)', high: 'var(--inspect-text)', watch: 'var(--inspect-text)', rising: 'var(--inspect-text)', no_data: 'var(--offline-text)', offline: 'var(--offline-text)' }[key] || 'var(--normal-text)')
+const tone = (key: string) => ({ urgent: 'var(--urgent-text)', backing_up: 'var(--urgent-text)', clean_soon: 'var(--inspect-text)', high: 'var(--inspect-text)', watch: 'var(--inspect-text)', rising: 'var(--inspect-text)', no_data: 'var(--offline-text)' }[key] || 'var(--normal-text)')
 // Only exceptions: a normal cleaning is detected by the sensor, nobody has to tap "cleaned".
 const ACTIONS: [string, string][] = [['Inspected', 'Inspected'], ['Obstruction found', 'Obstruction found'], ['Requires further investigation', "Couldn't clean"],
   ['No issue found', 'No issue found'], ['Cleaned / vacuumed', "Cleaned (sensor can't confirm)"]]
@@ -69,7 +69,7 @@ export default function Basin() {
       <div className="split">
         <section className="card" aria-label="Cross-section" style={{ flex: '999 1 440px', minWidth: 0 }}>
           <h2 style={{ marginBottom: 6 }}>Cross-section, to scale</h2>
-          <CrossSection d={d.dims} levelCm={d.level_cm} sedimentPct={d.sediment_pct} restriction={d.restriction} />
+          <CrossSection d={d.dims} levelCm={d.level_cm} sedimentPct={d.sediment_pct} restriction={d.restriction} estimated={d.invert_estimated} />
           <p className="sub">The sensor only sees the water surface. Sediment and restrictions are estimated from how the basin drains after rain.</p>
         </section>
         <div style={{ flex: '1 1 280px', display: 'flex', flexDirection: 'column', gap: 14 }}>

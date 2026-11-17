@@ -19,6 +19,7 @@ Column mapping (Montréal file -> ours):
     LATITUDE/LONGITUDE-> latitude/longitude
     TYPE_PUISARD_EG   -> basin_type      (CIRCULAIRE, RECTANGULAIRE, DE TROTTOIR...)
     DATE_INSTALLATION -> install_date    (1900-01-01 means "unknown" in the source)
+    PROVENANCE_DONNEE -> provenance      (how the location was surveyed: field ±10 cm, photo ±30-40 cm...)
     PROPRIETAIRE      -> owner           (the municipality)
     ELEVATION_TERRAIN -> ground_elevation_m (-999 means "unknown")
 """
@@ -34,7 +35,9 @@ OUT = os.path.join("data", "municipal_basins.csv")
 
 def make_slice(source, owner=DEFAULT_OWNER):
     df = pd.read_csv(source, encoding="utf-8-sig", low_memory=False)
-    df = df[(df["PROPRIETAIRE"] == owner) & (df["STATUT_ACTIF"] == "EXISTANT")]
+    df = df[df["PROPRIETAIRE"] == owner]
+    if "STATUT_ACTIF" in df:                        # absent from a hand-filtered export: then all are kept
+        df = df[df["STATUT_ACTIF"] == "EXISTANT"]
     out = pd.DataFrame({
         "municipal_id": df["ID_PUISARD"].astype(str),
         "address": df["ADRESSE"].fillna("").str.strip(),
@@ -44,6 +47,7 @@ def make_slice(source, owner=DEFAULT_OWNER):
         "install_date": df["DATE_INSTALLATION"].where(df["DATE_INSTALLATION"] != "1900-01-01", ""),
         "owner": df["PROPRIETAIRE"].str.title(),
         "ground_elevation_m": df["ELEVATION_TERRAIN"].where(df["ELEVATION_TERRAIN"] > -900),
+        "provenance": df["PROVENANCE_DONNEE"].str.capitalize() if "PROVENANCE_DONNEE" in df else "",
     })
     return out.sort_values("municipal_id").reset_index(drop=True)
 

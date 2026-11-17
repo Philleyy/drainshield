@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { cityBasins, type CityBasin } from '../city'
 import BasinMap from '../components/BasinMap'
-import BasinTable, { type BasinRow } from '../components/BasinTable'
+import BasinTable, { chipClass, type BasinRow } from '../components/BasinTable'
 import { StormTimeline, type RainBar } from '../components/Charts'
 import RunSummary, { type RunState } from '../components/Run'
 import { clock, duration, minutesBetween, useData } from '../view'
@@ -19,20 +20,26 @@ const fromNow = (nowIso: string, hhmm: string) => (Number(hhmm.slice(0, 2)) * 60
 
 export default function Overview() {
   const { data, error } = useData<OverviewData>('/overview')
-  const [all, setAll] = useState(false)
+  const [filter, setFilter] = useState<string | null>(null)             // a category, 'All', or null = needs action
+  const table = useRef<HTMLElement>(null)
+  const [showCity, setShowCity] = useState(false)
+  const [city, setCity] = useState<CityBasin[]>([])
+  useEffect(() => { if (showCity) cityBasins().then(setCity).catch(() => setCity([])) }, [showCity])
   if (error) return <div className="notice error" role="alert">{error}</div>
   if (!data) return <p className="muted">Loading…</p>
 
   const f = data.forecast
   const toRain = f.starts ? minutesBetween(data.now, f.starts) : null
   const flagged = data.basins.filter(b => b.category !== 'Normal')
+  const shown = filter === 'All' ? data.basins : filter ? data.basins.filter(b => b.category === filter) : flagged
+  const pick = (f: string) => { setFilter(filter === f ? null : f); table.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
   const beforeStorm = data.basins.filter(b => b.priority === 'Inspect before storm').length
   const plan = data.run.suggested, sent = data.run.sent
   const stops = plan ? plan.stops : sent ? sent.stops : []
 
   return (
     <>
-      <section className="card" aria-label="Storm timeline">
+      <section className="hero" aria-label="Storm timeline">
         <div className="row" style={{ alignItems: 'flex-end', gap: 20 }}>
           <div style={{ flex: '1 1 380px' }}>
             <div className="eyebrow">Next 36 hours · Environment Canada GEM</div>
@@ -43,18 +50,18 @@ export default function Overview() {
             <div><div className="big">{beforeStorm}</div><div className="sub" style={{ margin: 0 }}>{beforeStorm === 1 ? 'basin' : 'basins'} to clean first</div></div>
           </>}
         </div>
-        {f.hours.length > 0 && <StormTimeline rain={f.hours} nowIso={data.now} minutesToRain={f.heavy ? toRain : null}
-          run={plan ? { from: fromNow(data.now, plan.leave), to: fromNow(data.now, plan.leave) + plan.drive_min + plan.service_min, label: `Run · ${plan.leave}–${plan.back}` } : undefined} />}
+        {f.hours.length > 0 && <div className="chart-scroll"><StormTimeline rain={f.hours} nowIso={data.now} minutesToRain={f.heavy ? toRain : null}
+          run={plan ? { from: fromNow(data.now, plan.leave), to: fromNow(data.now, plan.leave) + plan.drive_min + plan.service_min, label: `Run · ${plan.leave}–${plan.back}` } : undefined} /></div>}
       </section>
 
-      <section className="grid-kpi" aria-label="Network status">
-        {([['Urgent', 'Urgent', 'var(--urgent-text)'], ['Inspect', 'Inspect soon', 'var(--inspect-text)'], ['Offline', 'Sensor offline', 'var(--offline-text)'], ['Normal', 'Draining normally', 'var(--normal-text)']] as const).map(([c, label, color]) => (
-          <div className="card" key={c}>
-            <div className="eyebrow">{label}</div>
-            <div className="big" style={{ color: data.counts[c] ? color : 'var(--ink)' }}>{data.counts[c]}</div>
-          </div>
+      <nav className="triage" aria-label="Filter the basins by status">
+        {([['Urgent', 'Urgent'], ['Inspect', 'Inspect soon'], ['Offline', 'Sensor offline'], ['Normal', 'Draining normally']] as const).map(([c, label]) => (
+          <button key={c} type="button" className={`pill ${chipClass(c)}`} aria-pressed={filter === c} onClick={() => pick(c)} disabled={!data.counts[c]}>
+            <b>{data.counts[c]}</b>{label}
+          </button>
         ))}
-      </section>
+        <button type="button" className="pill" aria-pressed={filter === 'All'} onClick={() => pick('All')}><b>{data.basins.length}</b>All basins</button>
+      </nav>
 
       {data.basins.length === 0 ? (
         <section className="card">
@@ -65,19 +72,22 @@ export default function Overview() {
       ) : <>
         <div className="split" style={{ alignItems: 'stretch' }}>
           <section className="card flush" aria-label="Map" style={{ flex: '999 1 520px', minWidth: 0 }}>
-            <BasinMap points={data.basins} line={plan?.line || sent?.line} stops={stops} depot={plan?.depot || sent?.depot} />
+            <BasinMap points={data.basins} line={plan?.line || sent?.line} stops={stops} depot={plan?.depot || sent?.depot} others={showCity ? city : []} />
+            <label className="check" style={{ padding: '10px 14px', borderTop: '1px solid var(--hairline)' }}>
+              <input type="checkbox" checked={showCity} onChange={e => setShowCity(e.target.checked)} />Show the city's other catch basins in this view (no sensor yet)
+            </label>
           </section>
           <div style={{ flex: '1 1 340px', maxWidth: 460, display: 'flex' }}><RunSummary run={data.run} /></div>
         </div>
 
-        <section className="card flush" aria-label="Basins">
+        <section className="card flush" aria-label="Basins" ref={table} style={{ scrollMarginTop: 16 }}>
           <div className="card-head">
-            <h2>{all ? 'All monitored basins' : 'Needs action'}</h2>
-            <button type="button" className="btn small" onClick={() => setAll(!all)}>{all ? 'Only those needing action' : `Show all ${data.basins.length}`}</button>
+            <h2>{filter === 'All' ? 'All monitored basins' : filter ? `${shown.length} × ${filter === 'Inspect' ? 'inspect soon' : filter.toLowerCase()}` : 'Needs action'}</h2>
+            {filter && <button type="button" className="btn small" onClick={() => setFilter(null)}>Back to needs action</button>}
           </div>
-          {!all && flagged.length === 0
+          {shown.length === 0
             ? <p className="sub" style={{ padding: '4px 16px 16px' }}>Nothing needs attention: all {data.basins.length} basins are draining normally.</p>
-            : <BasinTable rows={all ? data.basins : flagged} />}
+            : <BasinTable rows={shown} />}
         </section>
       </>}
     </>

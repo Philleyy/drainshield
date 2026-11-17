@@ -33,7 +33,7 @@ def default_config():
     return {
         "basin_id": "", "sensor_id": "", "municipal_id": "", "address": "",
         "latitude": 45.4440, "longitude": -73.7520,
-        "diameter_mm": 610, "invert_depth_mm": 1400, "outlet_mm": 250, "has_trap": True,
+        "diameter_mm": 610, "invert_depth_mm": 1400, "invert_known": True, "outlet_mm": 250, "has_trap": True,
         "sump_mm": 300, "inlets": [], "sensor_depth_mm": DEFAULT_SENSOR_DEPTH_MM,
         "blind_zone_mm": DEFAULT_BLIND_ZONE_MM,
         # only used to ESTIMATE the sediment in the sump (the sensor can't see under water)
@@ -107,6 +107,7 @@ def build_row(cfg):
         "base_cm": depth / 10, "stack": "",
         "grate_height_cm": depth / 10,
         "invert_depth_cm": cfg["invert_depth_mm"] / 10,
+        "invert_known": bool(cfg.get("invert_known", True)),     # False: a placeholder until the sensor learns it
         "sump_depth_cm": cfg["sump_mm"] / 10,
         "outlet_invert_cm": cfg["sump_mm"] / 10,
         "outlet_diameter_cm": cfg["outlet_mm"] / 10,

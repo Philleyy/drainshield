@@ -386,7 +386,10 @@ def basin_detail(basin_id, when):
     return {
         "now": iso(when), "id": basin_id, "address": b.get("address") if isinstance(b.get("address"), str) else "",
         "sector": sector(b.get("address") if isinstance(b.get("address"), str) else ""),
-        "facts": f"ø{b['inner_width_cm'] * 10:.0f} mm · outlet {b['invert_depth_cm'] / 100:.2f} m below the street",
+        "facts": f"ø{b['inner_width_cm'] * 10:.0f} mm · " + (
+            f"outlet {b['invert_depth_cm'] / 100:.2f} m below the street" if str(b.get("invert_known")) != "False"
+            else f"outlet {b['invert_depth_cm'] / 100:.2f} m below the street (measured by the sensor)"
+            if b.get("cal_status") == "learned" else "outlet depth not known yet: the sensor is learning it"),
         "calibrating": b.get("cal_note") if b.get("cal_status") == "learning" else None,
         "sensor": {"online": online and not S.get("iced"), "iced": bool(S.get("iced")),
                    "battery_pct": proc.battery_pct(S["battery_v"]), "updated": data_store.ago(S["minutes_since_reading"]),
@@ -399,6 +402,7 @@ def basin_detail(basin_id, when):
         "dims": {k: float(b[k]) for k in ("inner_width_cm", "invert_depth_cm", "sump_depth_cm", "outlet_diameter_cm",
                                            "sensor_depth_cm")},
         "level_cm": None if level is None or S["live"] == "no_data" else float(level),
+        "invert_estimated": str(b.get("invert_known")) == "False" and b.get("cal_status") != "learned",
         "sediment_pct": round(float(S["sediment_pct"])),
         "storms": [] if hist.empty else [
             {"start": iso(e["start"]), "mm": e["total_mm"], "verdict": e.get("verdict", ""), "status": e["status"]}
@@ -416,6 +420,8 @@ def save_basin(conn, fields):
     """fields: the as-built form (mm from the grate). Returns the warnings; raises ValueError on an error."""
     cfg = bm.default_config()
     cfg.update(fields)
+    if cfg["invert_depth_mm"] is None:       # not on the plans: a placeholder until the sensor learns it
+        cfg.update(invert_known=False, invert_depth_mm=cfg["sensor_depth_mm"] + 1000)
     msgs = bm.check(cfg)
     errors = [text for level, text in msgs if level == "error"]
     if errors:
@@ -428,6 +434,17 @@ def save_basin(conn, fields):
         conn.execute(insert(maint_t).values(basin_id=cfg["basin_id"], at=utcnow(), action=maintenance.INSTALL,
                                             note="Added on the website"))
     return [text for level, text in msgs if level != "error"]
+
+
+def city_basins():
+    """Every catch basin of the municipality (open data), for the map layer and the add-basin search."""
+    reg = data_store.municipal_basins()
+    cols = [c for c in ("municipal_id", "address", "latitude", "longitude", "basin_type", "provenance", "tier_label")
+            if c in reg]
+    if "tier_label" in reg:                  # only the A-F pilot tiers: the rest has no ranking to show
+        reg = reg.assign(tier_label=reg["tier_label"].where(reg["tier"].isin(list("ABCDEF"))))
+    rows = reg[cols].astype(object).where(reg[cols].notna(), None)
+    return {"columns": cols, "rows": rows.values.tolist()}
 
 
 def demo_story():

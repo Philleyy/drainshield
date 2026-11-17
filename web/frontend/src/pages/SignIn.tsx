@@ -9,7 +9,7 @@ export function WindowChart() {
     <div className="window-chart" aria-hidden="true">
       <svg viewBox="0 0 480 122" style={{ display: 'block', width: '100%', height: 'auto' }}>
         <rect x="20" y="10" width="200" height="88" fill="#fff4e3" />
-        <text x="28" y="28" fontFamily="Inter" fontSize="12" fontWeight="600" fill="#8a4b00">Safe cleaning window</text>
+        <text x="28" y="28" fontSize="12" fontWeight="600" fill="#8a4b00">Safe cleaning window</text>
         <rect x="20" y="74" width="70" height="12" rx="4" fill="#1d5fd1" />
         <line x1="0" y1="98" x2="480" y2="98" stroke="#c9d2d9" />
         <g fill="#2f7fd6">
@@ -18,8 +18,8 @@ export function WindowChart() {
           <rect x="334" y="80" width="20" height="18" rx="3" />
         </g>
         <line x1="20" y1="4" x2="20" y2="104" stroke="#14202b" strokeWidth="2" />
-        <text x="20" y="118" textAnchor="middle" fontFamily="Inter" fontSize="11" fontWeight="700" fill="#14202b">Now</text>
-        <text x="292" y="118" textAnchor="middle" fontFamily="Inter" fontSize="11" fill="#5f6b76">Storm</text>
+        <text x="20" y="118" textAnchor="middle" fontSize="11" fontWeight="700" fill="#14202b">Now</text>
+        <text x="292" y="118" textAnchor="middle" fontSize="11" fill="#5f6b76">Storm</text>
       </svg>
     </div>
   )

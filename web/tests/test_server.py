@@ -203,3 +203,14 @@ def test_emptied_sump_is_logged_once(client, monkeypatch):
     with db.engine.begin() as conn:
         rows = conn.execute(select(state.maint_t.c.note).where(state.maint_t.c.action == "Cleaned / vacuumed")).all()
     assert len(rows) == 1 and "Detected by the sensor" in rows[0][0]
+
+
+def test_basin_without_outlet_depth_and_city_list(client):
+    setup_admin(client)
+    r = client.post("/api/basins", json={"basin_id": "NEW-1", "municipal_id": "7082692", "latitude": 45.44,
+                                          "longitude": -73.75})
+    assert r.status_code == 200, r.text
+    d = client.get("/api/basins/NEW-1").json()
+    assert "learning" in d["facts"] and d["dims"]["invert_depth_cm"] == 140      # 0.40 m sensor + 1.00 m placeholder
+    city = client.get("/api/city-basins").json()
+    assert city["columns"][:4] == ["municipal_id", "address", "latitude", "longitude"]

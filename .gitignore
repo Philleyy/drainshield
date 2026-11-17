@@ -21,3 +21,6 @@ data/sensor_status.json
 
 # Pitch demo files: rebuilt by demo_scenario.py (or by the dashboard on first use)
 data/demo/
+
+# Wi-Fi password and upload key for the ESP8266 sketch
+arduino/drainshield_wifi/secrets.h

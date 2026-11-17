@@ -19,6 +19,9 @@ export default function Run() {
   const candidates = o.basins.filter(b => b.category !== 'Normal' && !b.dispatched)
   const sectorNames = [...new Set(candidates.map(b => b.sector))]
   const p = run.suggested
+  const late = p?.spare_min != null && p.spare_min < 0
+  let fitText = 'No rain in the forecast.'
+  if (p?.spare_min != null) fitText = late ? 'Does not fit before the rain.' : 'Fits before the rain.'
   const toggle = (id: string) => setExclude(x => (x.includes(id) ? x.filter(i => i !== id) : [...x, id]))
 
   return (
@@ -45,8 +48,8 @@ export default function Run() {
         </section>
       )}
 
-      {p && <div className={`notice ${p.spare_min != null && p.spare_min < 0 ? 'warn' : 'ok'}`}>
-        <b>{p.spare_min != null && p.spare_min < 0 ? 'Does not fit before the rain.' : p.spare_min != null ? 'Fits before the rain.' : 'No rain in the forecast.'}</b>{' '}
+      {p && <div className={`notice ${late ? 'warn' : 'ok'}`}>
+        <b>{fitText}</b>{' '}
         Leaves {p.leave}, back at the yard {p.back} ({spareText(p)}) · {p.stops.length} stops · {p.drive_min} min driving · {p.service_min} min on site · {p.km} km
         {p.note && <><br />{p.note}</>}
       </div>}
