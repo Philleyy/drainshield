@@ -75,7 +75,7 @@ if basin.get("cal_status") == "learning":
 # ---------------------------------------------------------------------------
 live = proc.live_summary(basin, S)
 live_key = {"normal": "ok", "rising": "rising", "high": "clean_soon", "backing_up": "urgent",
-            "no_data": "no_data"}[S["live"]]
+            "no_data": "no_data", "learning": "ok"}[S["live"]]
 b_key, b_icon, b_head, _ = proc.action_banner(basin, S)
 if priority == "Inspect before storm":
     b_key, b_icon = "urgent", "!"

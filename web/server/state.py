@@ -372,7 +372,7 @@ def basin_detail(basin_id, when):
     else:
         where = (f"≤ {proc.closest_readable_m(b):.2f} m below the street (above the sensor's range)"
                  if S["at_sensor_limit"] else f"{proc.depth_below_street_m(b, level):.2f} m below the street")
-        height = ("sump emptied" if level <= EMPTIED_CM else "at the outlet (resting level)"
+        height = ("outlet depth not learned yet" if S["live"] == "learning" else "sump emptied" if level <= EMPTIED_CM else "at the outlet (resting level)"
                   if level <= proc.DRAINED_WITHIN_CM else f"{level:.0f} cm above the outlet")
         water = {"key": S["live"], "title": proc.LIVE[S["live"]]["label"], "text": f"Water surface {where} · {height}"}
     health, detail, health_key, health_action = proc.drainage_health(b, S)

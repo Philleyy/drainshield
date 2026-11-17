@@ -274,6 +274,8 @@ def triage(b, S, forecast):
             "Usually clears as it warms up: check the sensor face if it lasts 6 h+"
     if S["live"] == "no_data" or S["status"] == "no_data":
         return "Offline", "Sensor offline", "Inspect the sensor"
+    if S["live"] == "learning":
+        return "Normal", "Learning outlet depth (new sensor)", live["action"]
     if S["live"] == "backing_up":
         return "Urgent", "Flooding / backing up now", live["action"]
     if S["live"] == "high":

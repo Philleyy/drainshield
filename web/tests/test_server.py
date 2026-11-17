@@ -214,3 +214,38 @@ def test_basin_without_outlet_depth_and_city_list(client):
     assert "learning" in d["facts"] and d["dims"]["invert_depth_cm"] == 140      # 0.40 m sensor + 1.00 m placeholder
     city = client.get("/api/city-basins").json()
     assert city["columns"][:4] == ["municipal_id", "address", "latitude", "longitude"]
+
+
+def test_esp8266_bench_demo(client):
+    """Tonight's demo: the ESP8266 sketch's exact message (UTC 'Z' times, null = no echo), then the basin pages."""
+    from datetime import datetime, timedelta, timezone
+    setup_admin(client)
+    key = client.post("/api/keys", json={"name": "ESP8266 bench"}).json()["key"]
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    dist = [42.7] * 10 + [15.0, 12.5, None, 30.2] + [42.6] * 6       # steady, hand over it, no echo, back
+    rows = [{"basin_id": "TEST-ESP", "timestamp": (now - timedelta(seconds=120 + 30 * (len(dist) - i))).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"), "distance_cm": d} for i, d in enumerate(dist)]
+    for r in rows:                                                   # one request per reading, like the ESP
+        a = client.post("/api/ingest", json={"readings": [r]}, headers={"Authorization": f"Bearer {key}"})
+        assert a.status_code == 200 and a.json()["accepted"] == 1, a.text
+    s = [x for x in client.get("/api/sensors").json()["sensors"] if x["basin_id"] == "TEST-ESP"][0]
+    assert s["distance_cm"] == 42.6 and s["readings_total"] == len(dist)
+    assert client.get("/api/overview").status_code == 200            # sensor not yet a basin: no crash
+    assert client.post("/api/basins", json={"basin_id": "TEST-ESP", "latitude": 45.448,
+                                            "longitude": -73.744}).status_code == 200
+    for path in ["/api/overview", "/api/basins/TEST-ESP", "/api/run", "/api/sensors/TEST-ESP/readings"]:
+        assert client.get(path).status_code == 200, path
+    # outlet depth left empty: the placeholder must not raise a flood alert while the sensor learns it
+    b = client.get("/api/overview").json()["basins"][0]
+    assert b["category"] == "Normal" and "Learning" in b["priority"], b
+    assert "not learned" in client.get("/api/basins/TEST-ESP").json()["water"]["text"]
+    # bench set-up: outlet depth = sensor depth + what it reads to the table -> normal; a hand at 15 cm -> urgent
+    # (the site shows readings up to the start of the current minute, so these are 1-2 min old)
+    client.post("/api/basins", json={"basin_id": "TEST-ESP", "latitude": 45.448, "longitude": -73.744,
+                                     "sensor_depth_mm": 400, "invert_depth_mm": 400 + 426})
+    assert client.get("/api/overview").json()["basins"][0]["category"] == "Normal"
+    hand = [{"basin_id": "TEST-ESP", "timestamp": (now - timedelta(seconds=120 - 20 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "distance_cm": 15.0} for i in range(3)]
+    client.post("/api/ingest", json={"readings": hand}, headers={"Authorization": f"Bearer {key}"})
+    b = client.get("/api/overview").json()["basins"][0]
+    assert b["category"] == "Urgent" and b["water"] == "0.55 m", (b["category"], b["priority"], b["water"])

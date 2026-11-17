@@ -92,6 +92,7 @@ LIVE = {
     "high":       {"label": "Not draining", "icon": "!", "status": "clean_soon"},
     "backing_up": {"label": "Backing up", "icon": "✖", "status": "urgent"},
     "no_data":    {"label": "No live data", "icon": "?", "status": "no_data"},
+    "learning":   {"label": "Learning the outlet depth", "icon": "…", "status": "ok"},
 }
 DIAGNOSIS = {
     "normal": "Normal",
@@ -370,6 +371,12 @@ def basin_status(basin, levels, events, rain, now, reset=None):
     if minutes_since > NO_DATA_AFTER_MIN:
         r.update(live="no_data", live_text=f"Last reading {nice_duration(minutes_since)} ago "
                                            f"({format_level(level)} at the time).")
+    elif str(basin.get("invert_known", True)) == "False" and basin.get("cal_status") != "learned" \
+            and not r["at_sensor_limit"]:
+        # the outlet depth is still a placeholder: water "above the outlet" would be measured against a guess
+        # (water at the sensor is still caught above: that one is measured from the street, not the outlet)
+        r.update(live="learning", live_text="Outlet depth not learned yet: needs a dry, steady day "
+                                            f"({basin.get('cal_note') or 'learning'}).")
     elif r["at_sensor_limit"] or level > HIGH_WATER_CM or (sub is not None and level >= sub):
         txt = f"{'At least ' if r['at_sensor_limit'] else ''}{format_level(level)} above normal."
         if sub is not None and level >= sub:
@@ -519,6 +526,8 @@ def live_summary(basin, S):
         action = "Monitor: fine if it drains right after the rain"
     elif key == "high":
         action = "Water stuck high in dry weather: check within 24 h"
+    elif key == "learning":
+        action = "No action: the sensor needs a dry, steady day to learn the outlet depth"
     else:
         action = ("Dispatch a crew now: street flooding risk. Put up slow-down / road-closed signs: passing cars "
                   "push waves toward doors and basement windows")
@@ -615,6 +624,8 @@ def action_banner(basin, S):
         return "no_data", "?", "Sensor offline: inspect the sensor", live["value"]
     if S["live"] == "high":
         return "clean_soon", "!", "Not draining after the rain", live["action"]
+    if S["live"] == "learning":
+        return "ok", "…", "New sensor: learning the outlet depth", live["action"]
     status, w = S["status"], S.get("worst_event")
     if status == "ok":
         head = "Normal: draining well" if not S["raining_now"] else "Normal: keeping up with the rain"

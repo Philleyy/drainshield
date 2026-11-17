@@ -81,7 +81,7 @@ int upload() {
     if (i) body += ",";
     body += "{\"basin_id\":\"" BASIN_ID "\",\"timestamp\":\"" + isoUtc(queue[i].t) + "\",\"distance_cm\":";
     body += isnan(queue[i].cm) ? String("null") : String(queue[i].cm, 1);
-    body += ",\"mode\":\"DRY\"}";
+    body += "}";
   }
   body += "]}";
 
@@ -91,6 +91,7 @@ int upload() {
   client.setInsecure();
   HTTPClient http;
   if (!http.begin(client, INGEST_URL)) return -1;
+  http.setTimeout(15000);   // the website can take a few seconds to wake up
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", String("Bearer ") + UPLOAD_KEY);
   int code = http.POST(body);
