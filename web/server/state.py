@@ -15,6 +15,7 @@ serving many users at once.
 
 import functools
 import json
+import math
 import os
 import re
 import sys
@@ -26,7 +27,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import delete, func, insert, select
 
-from . import config
+from . import config, season
 from .db import basins as basins_t, maintenance as maint_t, readings as readings_t, utcnow
 
 HERE = Path(__file__).resolve().parent
@@ -94,7 +95,9 @@ def use(conn, demo, minute=0):
         else:
             export_live(conn)
             auto_close(conn)
-        yield data_store.now().floor("s")          # to the second: a reading shows as soon as it arrives
+        now = data_store.now().floor("s")            # to the second: a reading shows as soon as it arrives
+        weather.HEAVY_RAIN_MM = season.info(now)["heavy_mm"]      # spring and fall: smaller storms count
+        yield now
 
 
 _exported = None
@@ -191,11 +194,38 @@ def progress(S, levels, when):
     step3 = (("Sensor saw the sump emptied", seen) if seen is not None else
              ("Cleaned (logged by the crew)", t) if done["action"] == "Cleaned / vacuumed" else
              ("Inspected: no issue found", t))
-    ok = hist[hist["informative"] & (hist["start"] >= t) & (hist["status"] == "ok") & (hist["end"] <= when)] \
-        if not hist.empty else hist
+    first = first_rain_after(hist, t, when)
+    step4 = (("Next rain drains fast", None) if first is None else
+             ("Verified: the next rain drained fast", first["end"]) if first["status"] == "ok" else
+             ("Still slow after cleaning: check again", None))
     return [("Flagged by the sensor", before["end"].iloc[0] if len(before) else None),
-            ("On a run", run["time"].iloc[-1] if len(run) else None), step3,
-            ("Verified: the next rain drained fast", ok["end"].iloc[0]) if len(ok) else ("Next rain drains fast", None)]
+            ("On a run", run["time"].iloc[-1] if len(run) else None), step3, step4]
+
+
+def first_rain_after(hist, t, when):
+    """The first storm big enough to judge the drainage that started after t and has ended, or None."""
+    if hist.empty:
+        return None
+    after = hist[hist["informative"] & (hist["start"] >= t) & (hist["end"] <= when)]
+    return None if after.empty else after.iloc[0]
+
+
+CHECK_DAYS = 30
+
+
+def cleaning_check(S, when):
+    """After the last cleaning, did the next rain drain normally? A confirmation for the city, from the sensor.
+    state: confirmed | still_slow | waiting (no rain big enough since)."""
+    entries = S["entries"]
+    done = entries[entries["action"] == "Cleaned / vacuumed"] if not entries.empty else entries
+    if done.empty or when - done["time"].iloc[-1] > pd.Timedelta(days=CHECK_DAYS):
+        return None
+    t = done["time"].iloc[-1]
+    first = first_rain_after(S["history"], t, when)
+    if first is None:
+        return {"state": "waiting", "cleaned_at": iso(t), "rain_at": None}
+    return {"state": "confirmed" if first["status"] == "ok" else "still_slow", "cleaned_at": iso(t),
+            "rain_at": iso(first["start"])}
 
 
 def steps_json(steps):
@@ -229,12 +259,15 @@ def network(when):
         # as route_page.py, but only BEFORE the rain: once it rains, the measured level speaks for itself
         if not S["raining_now"] and ((cat == "Normal" and p["flag"]) or (cat == "Inspect" and p["flag"] == "Urgent")):
             cat, priority, reason = p["flag"], "Predicted to back up", p["sentence"]
+        why = dict(proc.dispatch_summary(b, S)).get("Problem", "") if cat != "Normal" else ""   # what the sensor saw
         out.append({"id": bid, "address": r["address"], "sector": sector(r["address"]),
                     "lat": float(r["latitude"]), "lon": float(r["longitude"]), "category": cat,
-                    "priority": priority, "action": reason, "water": r["water"], "recovery": r["recovery"],
+                    "priority": priority, "action": reason, "why": "" if why == "None" else why,
+                    "water": r["water"], "recovery": r["recovery"],
                     "updated": r["updated"], "battery_pct": r["battery_pct"], "reading": r["reading"],
                     "dispatched": r["issue"] == "Verified / crew dispatched",
-                    "steps": steps_json(progress(S, data_store.levels_for(key, bid), when))})
+                    "steps": steps_json(progress(S, data_store.levels_for(key, bid), when)),
+                    "check": cleaning_check(S, when), "live": S["live"], "raining": bool(S["raining_now"])})
     order = {"Urgent": 0, "Inspect": 1, "Offline": 2, "Normal": 3}
     return sorted(out, key=lambda x: order[x["category"]])
 
@@ -243,8 +276,51 @@ def overview(when):
     net = network(when)
     _, _, rain, *_ = data_store.load_all()
     counts = {c: sum(b["category"] == c for b in net) for c in ("Urgent", "Inspect", "Offline", "Normal")}
+    checks = sorted(({"id": b["id"], "address": b["address"], **b["check"]} for b in net if b["check"]),
+                    key=lambda c: ({"still_slow": 0, "waiting": 1, "confirmed": 2}[c["state"]], c["cleaned_at"]))
     return {"now": iso(when), "forecast": forecast_json(rain, when), "counts": counts, "basins": net,
-            "run": run_state(net, rain, when)}
+            "run": run_state(net, rain, when), "season": season.info(when), "storm": storm_state(net, when),
+            "checks": checks}
+
+
+# ---------------------------------------------------------------------------- storm mode
+NEAR_M = 400                  # neighbours within this distance share the same rain
+RISE_WINDOW_MIN = 45
+NEIGHBOUR_RISE_CM = 5         # a neighbour taking in runoff rises at least this much in the window
+FLAT_CM = 1                   # ...while this basin stays flat at its resting level
+
+
+def distance_m(a, b):
+    """Metres between two basins (short distances: flat-earth approximation)."""
+    dy = (a["lat"] - b["lat"]) * 111_320
+    dx = (a["lon"] - b["lon"]) * 111_320 * math.cos(math.radians(a["lat"]))
+    return math.hypot(dx, dy)
+
+
+def rise_cm(levels, when):
+    w = levels[(levels["timestamp"] > when - pd.Timedelta(minutes=RISE_WINDOW_MIN)) & (levels["timestamp"] <= when)]
+    return None if len(w) < 2 else float(w["level_cm"].iloc[-1] - w["level_cm"].min())
+
+
+def storm_state(net, when):
+    """While it rains: the basins backing up or not draining, and (to be validated in the pilot) the ones that
+    stay flat while their neighbours fill, which may mean leaves on the grate."""
+    raining = any(b["raining"] for b in net)
+    alerts = [{"id": b["id"], "address": b["address"], "kind": b["live"], "water": b["water"]}
+              for b in net if b["live"] in ("backing_up", "high")]
+    if raining:
+        key = data_store.data_key()
+        rises = {b["id"]: rise_cm(data_store.levels_for(key, b["id"]), when) for b in net if b["live"] == "normal"}
+        for b in net:
+            r = rises.get(b["id"])
+            if r is None or r > FLAT_CM or not b["raining"]:
+                continue
+            near = [o for o in net if o["id"] != b["id"] and distance_m(b, o) <= NEAR_M
+                    and (rises.get(o["id"]) or 0) >= NEIGHBOUR_RISE_CM]
+            if len(near) >= 2:
+                alerts.append({"id": b["id"], "address": b["address"], "kind": "grate_suspect", "water": b["water"],
+                               "neighbours": [o["id"] for o in near]})
+    return {"raining": raining, "alerts": alerts}
 
 
 # ---------------------------------------------------------------------------- pre-storm run
@@ -268,9 +344,15 @@ def thin(line, n=400):
     return [[round(float(a), 5), round(float(b), 5)] for a, b in line[::step]]
 
 
+def in_quebec(lat, lon):
+    """Roughly Québec: anything else is a position left empty (0, 0) or a typo."""
+    return 44.9 <= lat <= 62.6 and -79.8 <= lon <= -57.1
+
+
 def suggested_run(net, rain, when, exclude=(), leave=None):
     """The run DrainShield proposes: every flagged basin no crew has been sent to yet, urgent first."""
-    todo = [b for b in net if b["category"] != "Normal" and not b["dispatched"] and b["id"] not in exclude]
+    todo = [b for b in net if b["category"] != "Normal" and not b["dispatched"] and b["id"] not in exclude
+            and in_quebec(b["lat"], b["lon"])]                   # a truck can't drive to a basin with no position
     if not todo:
         return None
     start = pd.Timestamp.combine(when.date(), pd.Timestamp(leave).time()) if leave \
@@ -386,6 +468,7 @@ def basin_detail(basin_id, when):
     return {
         "now": iso(when), "id": basin_id, "address": b.get("address") if isinstance(b.get("address"), str) else "",
         "sector": sector(b.get("address") if isinstance(b.get("address"), str) else ""),
+        "lat": float(b["latitude"]), "lon": float(b["longitude"]),
         "facts": f"ø{b['inner_width_cm'] * 10:.0f} mm · " + (
             f"outlet {b['invert_depth_cm'] / 100:.2f} m below the street" if str(b.get("invert_known")) != "False"
             else f"outlet {b['invert_depth_cm'] / 100:.2f} m below the street (measured by the sensor)"
@@ -393,9 +476,10 @@ def basin_detail(basin_id, when):
         "calibrating": b.get("cal_note") if b.get("cal_status") == "learning" else None,
         "sensor": {"online": online and not S.get("iced"), "iced": bool(S.get("iced")),
                    "battery_pct": proc.battery_pct(S["battery_v"]), "updated": data_store.ago(S["minutes_since_reading"]),
-                   "mode": S.get("reading_mode") if isinstance(S.get("reading_mode"), str) else None},
+                   "mode": S.get("reading_mode") if isinstance(S.get("reading_mode"), str) else None,
+                   "mode_code": S.get("reading_mode") if isinstance(S.get("reading_mode"), str) else None},   # untranslated, for the explanation
         "category": cat, "banner": {"kind": kind, "head": head, "rows": rows, "confidence": S.get("confidence")},
-        "steps": steps_json(progress(S, levels, when)),
+        "steps": steps_json(progress(S, levels, when)), "check": cleaning_check(S, when),
         "water": water, "drainage": {"key": health_key, "title": health, "text": detail, "action": health_action},
         "levels": [{"t": iso(t), "cm": float(v)} for t, v in zip(lv["timestamp"], lv["level_cm"])],
         "rain": [{"t": iso(t), "mm": round(float(mm), 1)} for t, mm in zip(rn["timestamp"], rn["rain_mm"])],
@@ -405,7 +489,8 @@ def basin_detail(basin_id, when):
         "invert_estimated": str(b.get("invert_known")) == "False" and b.get("cal_status") != "learned",
         "sediment_pct": round(float(S["sediment_pct"])),
         "storms": [] if hist.empty else [
-            {"start": iso(e["start"]), "mm": e["total_mm"], "verdict": e.get("verdict", ""), "status": e["status"]}
+            {"start": iso(e["start"]), "mm": e["total_mm"], "verdict": e.get("verdict", ""),
+             "status": e["status"] if isinstance(e["status"], str) else "raining"}      # NaN while it still rains
             for _, e in hist.iloc[::-1].head(8).iterrows()],
         "log": [] if entries.empty else [{"at": iso(e["time"]), "action": e["action"],
                                           "note": e["note"] if isinstance(e["note"], str) else ""}
@@ -434,6 +519,14 @@ def save_basin(conn, fields):
         conn.execute(insert(maint_t).values(basin_id=cfg["basin_id"], at=utcnow(), action=maintenance.INSTALL,
                                             note="Added on the website"))
     return [text for level, text in msgs if level != "error"]
+
+
+def remove_basin(conn, basin_id):
+    """The basin (asset) and its maintenance log go; its sensor's readings stay until the sensor is removed too."""
+    if not conn.execute(delete(basins_t).where(basins_t.c.basin_id == basin_id)).rowcount:
+        return False
+    conn.execute(delete(maint_t).where(maint_t.c.basin_id == basin_id))
+    return True
 
 
 def city_basins():

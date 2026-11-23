@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { initials, ROLE_LABEL } from '../api'
 import { useAuth } from '../auth'
+import { lang, setLang, t } from '../i18n'
 import { ClockBar, useView } from '../view'
 
 const icon = {
@@ -51,29 +52,31 @@ export default function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="shell">
-      <nav className="sidebar no-print" aria-label="Main">
+      <nav className="sidebar no-print" aria-label={t('Main')}>
         <NavLink to="/" className="brand" end>
           <Logo />
-          <span><b>DrainShield</b><small>Dorval · Public Works</small></span>
+          <span><b>DrainShield</b><small>{t('Dorval · Public Works')}</small></span>
         </NavLink>
-        <NavLink to="/" end className={link}><Icon name="overview" />Overview</NavLink>
-        <NavLink to="/run" className={link}><Icon name="runs" />Pre-storm run</NavLink>
-        <NavLink to="/crew" className={link}><Icon name="crew" />Crew view</NavLink>
-        <NavLink to="/basins" className={link}><Icon name="basins" />Basins</NavLink>
-        <NavLink to="/sensors" className={link}><Icon name="sensors" />Sensors</NavLink>
+        <NavLink to="/" end className={link}><Icon name="overview" />{t('Overview')}</NavLink>
+        <NavLink to="/run" className={link}><Icon name="runs" />{t('Pre-storm run')}</NavLink>
+        <NavLink to="/crew" className={link}><Icon name="crew" />{t('Crew view')}</NavLink>
+        <NavLink to="/basins" className={link}><Icon name="basins" />{t('Basins')}</NavLink>
+        <NavLink to="/sensors" className={link}><Icon name="sensors" />{t('Sensors')}</NavLink>
         {user.role === 'admin' && <>
-          <div className="nav-section">Administration</div>
-          <NavLink to="/admin/accounts" className={link}><Icon name="people" />Accounts</NavLink>
-          <NavLink to="/admin/keys" className={link}><Icon name="key" />Sensor upload keys</NavLink>
+          <div className="nav-section">{t('Administration')}</div>
+          <NavLink to="/admin/accounts" className={link}><Icon name="people" />{t('Accounts')}</NavLink>
+          <NavLink to="/admin/keys" className={link}><Icon name="key" />{t('Sensor upload keys')}</NavLink>
         </>}
         <div className="grow" />
-        {!locked && <Segmented label="Data" value={demo ? 'demo' : 'live'} onChange={v => setDemo(v === 'demo')}
-          options={[['live', 'Live'], ['demo', 'Pitch demo']]} />}
-        <Segmented label="Theme" value={dark ? 'dark' : 'light'} onChange={v => setDark(v === 'dark')}
-          options={[['light', 'Light'], ['dark', 'Dark']]} />
-        <NavLink to="/account/password" className={link}><Icon name="lock" />Change password</NavLink>
+        {!locked && <Segmented label={t('Data')} value={demo ? 'demo' : 'live'} onChange={v => setDemo(v === 'demo')}
+          options={[['live', t('Live')], ['demo', t('Pitch demo')]]} />}
+        <Segmented label={t('Theme')} value={dark ? 'dark' : 'light'} onChange={v => setDark(v === 'dark')}
+          options={[['light', t('Light')], ['dark', t('Dark')]]} />
+        <Segmented label={t('Language')} value={lang} onChange={v => { if (v !== lang) setLang(v as 'fr' | 'en') }}
+          options={[['fr', 'Français'], ['en', 'English']]} />
+        <NavLink to="/account/password" className={link}><Icon name="lock" />{t('Change password')}</NavLink>
         <button type="button" className="nav-link" style={{ border: 0, background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
-          onClick={async () => { await signOut(); navigate('/signin') }}><Icon name="out" />Sign out</button>
+          onClick={async () => { await signOut(); navigate('/signin') }}><Icon name="out" />{t('Sign out')}</button>
         <div className="me">
           <span className="avatar">{initials(user.name, user.email)}</span>
           <span><b>{user.name || user.email}</b><small>{ROLE_LABEL[user.role]}</small></span>

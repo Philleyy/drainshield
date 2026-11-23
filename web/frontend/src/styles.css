@@ -89,6 +89,7 @@ button, input, select { font: inherit; color: inherit; }
 /* the storm forecast is the page's headline: it sits on the page itself, not in another box */
 .hero { display: flex; flex-direction: column; gap: var(--s2); }
 /* on a phone the 36-hour chart keeps a readable size and scrolls sideways instead of shrinking */
+.hero .small-big { font-size: clamp(22px, 2.4vw, 28px); }
 .chart-scroll { overflow-x: auto; } .chart-scroll > svg { min-width: 680px; }
 .card.flush { padding: 0; overflow: hidden; }
 .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
@@ -147,9 +148,13 @@ td small { display: block; color: var(--muted); font-size: 13px; }
   gap: 8px; text-decoration: none; color: var(--ink); }
 .btn:hover { background: var(--hover); color: var(--ink); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.primary:hover { background: #174fae; }
+.btn.primary:hover { background: #174fae; color: #fff; }
 .btn.danger { color: var(--urgent-text); }
 .btn.small { min-height: 34px; padding: 0 10px; font-size: 13px; }
+.btn.danger { color: var(--urgent-text); border-color: currentColor; }
+.btn.danger:hover { background: var(--urgent-tint); }
+.danger-zone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+.danger-zone h2 { font-size: 16px; }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
@@ -189,6 +194,50 @@ pre { background: #14202b; color: #e6edf6; padding: 12px 14px; border-radius: 10
 .segmented { display: flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; margin: 4px 0; }
 .segmented button { flex: 1; min-height: 34px; border: 0; background: transparent; font-size: 13px; cursor: pointer; color: var(--ink-2); }
 .segmented button[aria-pressed=true] { background: var(--ink); color: var(--surface); font-weight: 600; }
+/* ---------- overview: one-line status, then the list beside the map */
+.status-line { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.status-line h1 { margin: 0; }
+.status-line .sub { margin: 4px 0 0; }
+.map-layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+.side-list { display: flex; flex-direction: column; min-height: 0; max-height: calc(clamp(360px, 60vh, 640px) + 90px); }
+.side-rows { overflow-y: auto; flex: 1; }
+.side-form { max-height: calc(clamp(360px, 60vh, 640px) + 90px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px; border-bottom: 1px solid var(--hairline); }
+.tabs button { border: 0; background: none; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+.tabs button b { color: var(--ink); margin-left: 2px; }
+.tabs button[aria-selected=true] { background: var(--active); color: var(--ink); font-weight: 600; }
+.side-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; width: 100%; text-align: left; padding: 10px 14px;
+  border: 0; border-bottom: 1px solid var(--hairline); background: none; font: inherit; font-size: 14px; color: var(--ink); cursor: pointer; }
+.side-row > i { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; }
+.side-row small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.side-row time { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.side-row:hover { background: var(--hover); }
+.side-row[aria-pressed=true] { background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--accent); }
+.map-card-wrap { position: relative; overflow: hidden; }
+.map-card { position: absolute; right: 12px; top: 12px; z-index: 500; width: min(330px, calc(100% - 70px)); padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14); }
+.map-card h3 { font-size: 16px; }
+.lifecycle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 14px; color: var(--ink-2); }
+.lifecycle b { font-family: var(--display); font-size: 20px; color: var(--ink); margin-right: 2px; }
+.lifecycle .eyebrow { margin-right: 6px; }
+@media (max-width: 900px) {
+  .map-layout { grid-template-columns: 1fr; }
+  .map-layout > .map-card-wrap { order: -1; }
+  .side-list, .side-form { max-height: none; }
+}
+.map-box { width: 100%; background: var(--bg); z-index: 0; }
+.map-box .leaflet-tile-pane { filter: saturate(0.3) brightness(1.03); }
+.map-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(0.3) brightness(0.9); }
+.map-pin { background: none; border: 0; }
+.pin { position: absolute; left: 0; top: 0; width: 14px; height: 14px; transform: translate(-50%, -50%); border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25); display: grid; place-items: center;
+  color: #fff; font: 700 11px/1 var(--font); transition: transform 120ms ease-out; }
+.pin.big { width: 24px; height: 24px; }
+.pin.on { transform: translate(-50%, -50%) scale(1.35); box-shadow: 0 0 0 3px var(--accent); }
+.pin.depot { width: 18px; height: 18px; border-radius: 4px; background: #14202b; }
+.pin.preview { background: var(--accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent); }
+.pin-label { position: absolute; left: 16px; top: -9px; white-space: nowrap; font: 700 12px/18px var(--font); color: var(--ink);
+  text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface), 0 0 3px var(--surface); pointer-events: none; }
 .map-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; font-size: 12px; color: var(--ink-2); border-top: 1px solid var(--hairline); }
 .map-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 .facts { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; margin: 0; font-size: 14px; }
@@ -202,6 +251,26 @@ pre { background: #14202b; color: #e6edf6; padding: 12px 14px; border-radius: 10
 .progress i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--border-strong); }
 .progress i.done { background: var(--normal); border-color: var(--normal); }
 .progress span { margin-left: 6px; }
+/* ---------- basin page: a profile column (map, facts, cross-section) beside figures, diagnosis and activity */
+.profile { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.profile-side, .profile-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.profile-facts { padding: 14px 16px; border-top: 1px solid var(--hairline); grid-template-columns: 96px 1fr; }
+.profile-facts small { display: block; color: var(--muted); font-size: 13px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.metrics .card .sub { margin-bottom: 0; }
+.split > .metrics { flex: 1 1 240px; grid-template-columns: 1fr; align-content: start; }
+.metrics .big { font-size: clamp(22px, 1vw + 14px, 28px); }
+.timeline { list-style: none; margin: 0; padding: 6px 16px 10px; }
+.timeline li { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; padding: 10px 0; position: relative; font-size: 14px; }
+.timeline li::before { content: ""; position: absolute; left: 6px; top: 26px; bottom: -10px; width: 2px; background: var(--hairline); }
+.timeline li:last-child::before { display: none; }
+.timeline small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.timeline time { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tl-dot { width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; background: var(--offline); box-shadow: 0 0 0 3px var(--surface); position: relative; z-index: 1; }
+.tl-storm .tl-dot { background: var(--rain); } .tl-crew .tl-dot { background: var(--accent); }
+.tl-done .tl-dot { background: var(--normal); } .tl-problem .tl-dot { background: var(--inspect); }
+.profile .danger-zone { flex-direction: column; align-items: flex-start; }
+@media (max-width: 980px) { .profile { grid-template-columns: 1fr; } }
 .log-actions { padding: 14px 16px; border-top: 1px solid var(--hairline); display: flex; flex-direction: column; gap: 8px; }
 details.card summary { cursor: pointer; }
 details.card[open] summary { margin-bottom: 14px; }
@@ -234,6 +303,22 @@ details.card[open] summary { margin-bottom: 14px; }
 .big-num { width: 44px; height: 44px; font-size: 20px; }
 .btn.tall { min-height: 56px; flex: 1 1 160px; font-size: 16px; }
 
+/* ---------- storm mode: takes the top of the overview while it rains */
+.storm { border: 2px solid var(--urgent); display: flex; flex-direction: column; gap: 14px; }
+.storm-eyebrow { color: var(--urgent-text); }
+.alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.alerts li { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--hairline); }
+.alerts li > div:first-of-type { flex: 1 1 260px; min-width: 0; }
+.alerts small { display: block; color: var(--muted); font-size: 13px; }
+
+/* ---------- the cleaning list: a sheet that prints on letter paper */
+.sheet { display: flex; flex-direction: column; gap: 16px; }
+.sheet-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; }
+.sheet-table th, .sheet-table td { vertical-align: top; }
+.sheet-table td:first-child { font-weight: 700; width: 3em; }
+.box { display: inline-block; width: 18px; height: 18px; border: 1.5px solid var(--ink); border-radius: 3px; }
+.notes-cell { min-width: 160px; border-bottom: 1px solid var(--border-strong); }
+
 /* ---------- feel: quick, small transitions on everything you can press (only colour and position, so it stays smooth) */
 .btn, .nav-link, .pill, .segmented button, tr.clickable td {
   transition: background-color var(--ease), border-color var(--ease), color var(--ease), transform var(--ease); }
@@ -243,4 +328,8 @@ details.card[open] summary { margin-bottom: 14px; }
 @media print {
   .no-print, .map-legend { display: none !important; }
   body { background: #fff; } .content { padding: 0; } .card { border-color: #999; break-inside: avoid; }
+  .sheet { border: 0; padding: 0; color: #000; }
+  .sheet-table { font-size: 11pt; } .sheet-table tr { break-inside: avoid; }
+  .table-wrap { overflow: visible !important; }
+  @page { size: letter landscape; margin: 12mm; }
 }

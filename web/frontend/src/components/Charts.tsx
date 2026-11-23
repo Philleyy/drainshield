@@ -1,5 +1,6 @@
 // Hand-drawn SVG charts (no chart library): the storm timeline, a basin's day, and its cross-section.
 import { clock } from '../view'
+import { num, t } from '../i18n'
 
 export interface RainBar { t: string; mm: number }
 // colours come from the theme (styles.css), so the charts follow light / dark
@@ -15,10 +16,10 @@ export function StormTimeline({ rain, nowIso, minutesToRain, run }: { rain: Rain
   const wet = rain.filter(r => r.mm > 0)
   return (
     <svg viewBox={`0 0 ${W} 208`} style={{ display: 'block', width: '100%', height: 'auto' }} role="img"
-      aria-label={wet.length ? `Hourly rain forecast: ${wet.map(r => `${clock(r.t)} ${r.mm} mm`).join(', ')}` : 'No rain in the next 36 hours'}>
+      aria-label={wet.length ? `${t('Hourly rain forecast')}: ${wet.map(r => `${clock(r.t)} ${r.mm} mm`).join(', ')}` : t('No rain in the next 36 hours')}>
       {windowW > 0 && <>
         <rect x={nowX} y={20} width={windowW} height={base - 20} fill="var(--window-tint)" />
-        <text x={nowX + 8} y={38} {...text} fontWeight={600} fill="var(--window)">Safe cleaning window</text>
+        <text x={nowX + 8} y={38} {...text} fontWeight={600} fill="var(--window)">{t('Safe cleaning window')}</text>
       </>}
       <line x1={x0} y1={(base + top) / 2} x2={W - x0} y2={(base + top) / 2} stroke={GRID} />
       <line x1={x0} y1={top} x2={W - x0} y2={top} stroke={GRID} />
@@ -39,7 +40,7 @@ export function StormTimeline({ rain, nowIso, minutesToRain, run }: { rain: Rain
         <text x={nowX + (run.to / 60) * step + 6} y={base - 19} {...text} fontWeight={600} fill="var(--link)" stroke="var(--bg)" strokeWidth={4} paintOrder="stroke">{run.label}</text>
       </>}
       <line x1={nowX} y1={14} x2={nowX} y2={base + 6} stroke={INK} strokeWidth={2} />
-      <text x={nowX} y={base + 34} textAnchor="middle" {...text} fontWeight={700} fill={INK}>Now</text>
+      <text x={nowX} y={base + 34} textAnchor={nowX < 80 ? 'start' : 'middle'} {...text} fontWeight={700} fill={INK}>{t('Now')}</text>
     </svg>
   )
 }
@@ -57,8 +58,8 @@ export function DayChart({ rain, levels, nowIso }: { rain: RainBar[]; levels: { 
   const peak = levels.reduce((a, l) => (l.cm > a.cm ? l : a), { t: '', cm: 0 })
   return (
     <svg viewBox={`0 0 ${W} 314`} style={{ display: 'block', width: '100%', height: 'auto' }} role="img"
-      aria-label={`Rain and water level today. Highest water so far: ${peak.cm} cm above the outlet${peak.t ? ` at ${clock(peak.t)}` : ''}.`}>
-      <text x={x0} y={rTop - 6} {...text}>Rain (mm in each hour)</text>
+      aria-label={t('Rain and water level today. Highest water so far: {cm} cm above the outlet{at}.', { cm: peak.cm, at: peak.t ? ` ${t('at')} ${clock(peak.t)}` : '' })}>
+      <text x={x0} y={rTop - 6} {...text}>{t('Rain (mm in each hour)')}</text>
       <line x1={x0} y1={rBase} x2={x1} y2={rBase} stroke={AXIS} />
       {rain.map(r => r.mm > 0 && (
         <g key={r.t}>
@@ -67,7 +68,7 @@ export function DayChart({ rain, levels, nowIso }: { rain: RainBar[]; levels: { 
           <text x={x(minuteOf(r.t) + 30)} y={rBase - (r.mm / rMax) * (rBase - rTop) - 4} textAnchor="middle" {...text} fontSize={11}>{r.mm}</text>
         </g>
       ))}
-      <text x={x0} y={lTop - 8} {...text}>Water above the outlet (cm)</text>
+      <text x={x0} y={lTop - 8} {...text}>{t('Water above the outlet (cm)')}</text>
       {[...(lMin < 0 ? [lMin] : []), 0, lMax / 2, lMax].map(v => (
         <g key={v}>
           <line x1={x0} y1={y(v)} x2={x1} y2={y(v)} stroke={v ? GRID : AXIS} />
@@ -75,10 +76,10 @@ export function DayChart({ rain, levels, nowIso }: { rain: RainBar[]; levels: { 
         </g>
       ))}
       {path && <path d={path} fill="none" stroke="var(--link)" strokeWidth={2.5} strokeLinejoin="round" />}
-      {peak.cm >= 5 && <text x={x(minuteOf(peak.t))} y={y(peak.cm) - 8} textAnchor="middle" {...text} fontWeight={600} fill={INK}>{peak.cm} cm at {clock(peak.t)}</text>}
+      {peak.cm >= 5 && <text x={x(minuteOf(peak.t))} y={y(peak.cm) - 8} textAnchor="middle" {...text} fontWeight={600} fill={INK}>{peak.cm} cm {t('at')} {clock(peak.t)}</text>}
       {[0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => <text key={h} x={x(h * 60)} y={lBase + 20} textAnchor="middle" {...text}>{String(h % 24).padStart(2, '0')}:00</text>)}
       <line x1={x(nowM)} y1={rTop} x2={x(nowM)} y2={lBase} stroke={INK} strokeWidth={1.5} strokeDasharray="4 4" />
-      <text x={x(nowM)} y={lBase + 36} textAnchor="middle" {...text} fontWeight={700} fill={INK}>Now</text>
+      <text x={x(nowM)} y={lBase + 36} textAnchor="middle" {...text} fontWeight={700} fill={INK}>{t('Now')}</text>
     </svg>
   )
 }
@@ -92,7 +93,7 @@ export function CrossSection({ d, levelCm, sedimentPct, restriction, estimated }
   const xl = 120, w = d.inner_width_cm * s, xr = xl + w, wall = 22
   const waterTop = levelCm == null ? null : y(Math.min(Math.max(d.invert_depth_cm - levelCm, 0), floor))
   const sedH = ((sedimentPct || 0) / 100) * d.sump_depth_cm * s
-  const m = (cm: number) => (cm / 100).toFixed(2)
+  const m = (cm: number) => num((cm / 100).toFixed(2))
   const lx = xr + wall + 90
   const label = (depth: number, t: string) => (
     <g key={t}>
@@ -102,7 +103,7 @@ export function CrossSection({ d, levelCm, sedimentPct, restriction, estimated }
   )
   return (
     <svg viewBox={`0 0 ${lx + (estimated ? 470 : 300)} ${y(floor) + 40}`} style={{ display: 'block', width: '100%', maxWidth: 700, height: 'auto', margin: '0 auto' }} role="img"
-      aria-label={`Cross-section: sensor ${m(d.sensor_depth_cm)} m below the street, outlet at ${m(d.invert_depth_cm)} m, sump floor at ${m(floor)} m. ${levelCm == null ? 'No current water reading.' : `Water ${m(Math.max(d.invert_depth_cm - levelCm, 0))} m below the street.`}`}>
+      aria-label={`${t('Cross-section: sensor {s} m below the street, outlet at {o} m, sump floor at {f} m.', { s: m(d.sensor_depth_cm), o: m(d.invert_depth_cm), f: m(floor) })} ${levelCm == null ? t('No current water reading.') : t('Water {w} m below the street.', { w: m(Math.max(d.invert_depth_cm - levelCm, 0)) })}`}>
       <rect x={xl - wall - 40} y={top} width={w + 2 * wall + 80} height={y(floor) - top + 20} fill="#efe8dc" />
       <rect x={xl} y={top + 8} width={w} height={y(floor) - top - 8} fill="#fbfbfc" />
       {waterTop != null && <rect x={xl} y={waterTop} width={w} height={y(floor) - waterTop} fill="#7fb2e5" />}
@@ -114,12 +115,12 @@ export function CrossSection({ d, levelCm, sedimentPct, restriction, estimated }
       <rect x={xl - wall - 8} y={top - 4} width={w + 2 * wall + 16} height={10} fill="#3a3f45" />
       <rect x={xr} y={y(d.invert_depth_cm - d.outlet_diameter_cm)} width={wall + 60} height={d.outlet_diameter_cm * s} fill="#d8d5ce" stroke="#a9a59c" strokeWidth={2} />
       <path d={`M${xl} ${y(d.sensor_depth_cm) - 10} L${xl + 24} ${y(d.sensor_depth_cm) - 10} L${xl} ${y(d.sensor_depth_cm) + 12} Z`} fill={INK} />
-      {label(0, '0.00 m · Street grate')}
-      {label(d.sensor_depth_cm, `−${m(d.sensor_depth_cm)} m · Sensor`)}
-      {label(d.invert_depth_cm, `${estimated ? '≈ ' : ''}−${m(d.invert_depth_cm)} m · Outlet ø${d.outlet_diameter_cm * 10}${estimated ? ' (guess until the sensor learns it)' : ''}`)}
-      {label(floor, `${estimated ? '≈ ' : ''}−${m(floor)} m · Sump floor`)}
+      {label(0, `${num('0.00')} m · ${t('Street grate')}`)}
+      {label(d.sensor_depth_cm, `−${m(d.sensor_depth_cm)} m · ${t('Sensor')}`)}
+      {label(d.invert_depth_cm, `${estimated ? '≈ ' : ''}−${m(d.invert_depth_cm)} m · ${t('Outlet')} ø${d.outlet_diameter_cm * 10}${estimated ? ` ${t('(guess until the sensor learns it)')}` : ''}`)}
+      {label(floor, `${estimated ? '≈ ' : ''}−${m(floor)} m · ${t('Sump floor')}`)}
       {waterTop != null && <text x={xl + w / 2} y={waterTop - 8} textAnchor="middle" fontSize={15} fontWeight={600} fill="#1d4aa8">−{m(Math.max(d.invert_depth_cm - (levelCm || 0), 0))} m</text>}
-      {sedH > 14 && <text x={xl + w / 2} y={y(floor) - sedH / 2 + 5} textAnchor="middle" fontSize={13} fontWeight={600} fill="#fff">sediment ~{Math.round(sedimentPct || 0)}%</text>}
+      {sedH > 14 && <text x={xl + w / 2} y={y(floor) - sedH / 2 + 5} textAnchor="middle" fontSize={13} fontWeight={600} fill="#fff">{t('sediment')} ~{Math.round(sedimentPct || 0)}%</text>}
       {restriction && <text x={lx} y={y(d.invert_depth_cm) + 26} fontSize={14} fontWeight={600} fill="var(--inspect-text)">{restriction}</text>}
     </svg>
   )

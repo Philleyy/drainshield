@@ -1,4 +1,5 @@
 // Small helper for talking to the Python server. Cookies are sent automatically (same site).
+import { locale, t } from './i18n'
 
 export class ApiError extends Error {
   status: number
@@ -10,13 +11,13 @@ export class ApiError extends Error {
 
 function messageFrom(body: unknown, status: number): string {
   const detail = (body as { detail?: unknown })?.detail
-  if (typeof detail === 'string') return detail
+  if (typeof detail === 'string') return t(detail)                   // the server's messages are English
   if (Array.isArray(detail) && detail.length) {
     // FastAPI validation errors: [{loc, msg}]
     const first = detail[0] as { msg?: string }
-    return (first.msg || 'Please check the form.').replace(/^Value error, /, '')
+    return t((first.msg || 'Please check the form.').replace(/^Value error, /, ''))
   }
-  return status >= 500 ? 'The server had a problem. Try again in a moment.' : 'Something went wrong.'
+  return t(status >= 500 ? 'The server had a problem. Try again in a moment.' : 'Something went wrong.')
 }
 
 export async function api<T = unknown>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -29,7 +30,7 @@ export async function api<T = unknown>(path: string, options: { method?: string;
       credentials: 'same-origin',
     })
   } catch {
-    throw new ApiError(0, 'No connection to the server. Check your internet and try again.')
+    throw new ApiError(0, t('No connection to the server. Check your internet and try again.'))
   }
   const text = await res.text()
   let body: unknown = null
@@ -51,10 +52,10 @@ export interface User {
 }
 
 export const ROLE_LABEL: Record<Role, string> = {
-  admin: 'Administrator',
-  engineering: 'Engineering',
-  crew: 'Crew',
-  demo: 'Demo (judges)',
+  admin: t('Administrator'),
+  engineering: t('Engineering'),
+  crew: t('Crew'),
+  demo: t('Demo (judges)'),
 }
 
 export function initials(name: string, email: string) {
@@ -62,7 +63,7 @@ export function initials(name: string, email: string) {
   return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?'
 }
 
-const timeFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric',
+const timeFmt = new Intl.DateTimeFormat(locale, { timeZone: 'America/Toronto', month: 'short', day: 'numeric',
   hour: '2-digit', minute: '2-digit', hour12: false })
 
 export function localTime(iso: string | null) {
@@ -70,12 +71,12 @@ export function localTime(iso: string | null) {
 }
 
 export function ago(iso: string | null, now = Date.now()) {
-  if (!iso) return 'never'
+  if (!iso) return t('never')
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))
-  if (s < 60) return 'just now'
+  if (s < 60) return t('just now')
   const m = Math.round(s / 60)
-  if (m < 60) return `${m} min ago`
+  if (m < 60) return t('{d} ago', { d: `${m} min` })
   const h = Math.floor(m / 60)
-  if (h < 48) return `${h} h ${m % 60 ? `${m % 60} min ` : ''}ago`
-  return `${Math.round(h / 24)} days ago`
+  if (h < 48) return t('{d} ago', { d: `${h} h${m % 60 ? ` ${m % 60} min` : ''}` })
+  return t('{d} ago', { d: t('{n} days', { n: Math.round(h / 24) }) })
 }

@@ -99,6 +99,12 @@ maintenance = Table(
     Column("user_id", Integer, ForeignKey("users.id", ondelete="SET NULL")),
 )
 
+settings = Table(                                       # small city-wide settings, e.g. the on-call foreman
+    "settings", metadata,
+    Column("key", String(40), primary_key=True),
+    Column("value", Text, nullable=False, default=""),
+)
+
 engine = create_engine(config.DATABASE_URL, pool_pre_ping=True, future=True,
                        connect_args={"check_same_thread": False} if config.DATABASE_URL.startswith("sqlite") else {})
 

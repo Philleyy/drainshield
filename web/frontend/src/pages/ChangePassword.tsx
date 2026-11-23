@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { useAuth } from '../auth'
+import { t } from '../i18n'
 
 export default function ChangePassword() {
   const { user, refresh } = useAuth()
@@ -17,7 +18,7 @@ export default function ChangePassword() {
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    if (next !== confirm) { setError('The two new passwords are not the same.'); return }
+    if (next !== confirm) { setError(t('The two new passwords are not the same.')); return }
     setBusy(true)
     try {
       await api('/auth/password', { body: { current, new: next } })
@@ -26,7 +27,7 @@ export default function ChangePassword() {
       setCurrent(''); setNext(''); setConfirm('')
       if (first) navigate('/', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not change the password.')
+      setError(err instanceof ApiError ? err.message : t('Could not change the password.'))
     } finally {
       setBusy(false)
     }
@@ -36,29 +37,29 @@ export default function ChangePassword() {
     <>
       <div className="page-head">
         <div>
-          <h1>{first ? 'Choose your own password' : 'Change password'}</h1>
+          <h1>{first ? t('Choose your own password') : t('Change password')}</h1>
           <p className="sub">{first
-            ? 'You signed in with a temporary password. Pick your own to continue.'
-            : 'Signs you out on your other devices.'}</p>
+            ? t('You signed in with a temporary password. Pick your own to continue.')
+            : t('Signs you out on your other devices.')}</p>
         </div>
       </div>
       <form className="card" style={{ maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 16 }} onSubmit={submit}>
         {error && <div className="notice error" role="alert">{error}</div>}
-        {done && !first && <div className="notice ok" role="status">Password changed.</div>}
+        {done && !first && <div className="notice ok" role="status">{t('Password changed.')}</div>}
         <div className="field">
-          <label htmlFor="cur">{first ? 'Temporary password' : 'Current password'}</label>
+          <label htmlFor="cur">{first ? t('Temporary password') : t('Current password')}</label>
           <input id="cur" type="password" autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="new">New password</label>
+          <label htmlFor="new">{t('New password')}</label>
           <input id="new" type="password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} />
-          <span className="hint">At least 10 characters.</span>
+          <span className="hint">{t('At least 10 characters.')}</span>
         </div>
         <div className="field">
-          <label htmlFor="new2">New password again</label>
+          <label htmlFor="new2">{t('New password again')}</label>
           <input id="new2" type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} />
         </div>
-        <div className="row"><button className="btn primary" type="submit" disabled={busy || !current || !next}>Save password</button></div>
+        <div className="row"><button className="btn primary" type="submit" disabled={busy || !current || !next}>{t('Save password')}</button></div>
       </form>
     </>
   )

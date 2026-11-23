@@ -28,6 +28,12 @@ def client(tmp_path, monkeypatch):
     main.security.limiter.fails.clear()
     from fastapi.testclient import TestClient
     with TestClient(main.app) as c:
+        send = c.request
+
+        def english(method, url, *args, **kwargs):          # the site answers in French by default; these checks read English
+            url = str(url)
+            return send(method, url + ("&" if "?" in url else "?") + "lang=en", *args, **kwargs)
+        c.request = english
         yield c
 
 
@@ -100,7 +106,9 @@ def test_ingest_with_key_and_duplicates(client):
     assert client.post("/api/ingest", json={"readings": rows},
                        headers={"Authorization": "Bearer dsk_bad_key"}).status_code == 401
     r = client.post("/api/ingest", json={"readings": rows}, headers={"Authorization": f"Bearer {key}"})
-    assert r.json() == {"accepted": 2, "duplicates": 0, "modes": {}}
+    body = r.json()
+    assert body["season"]["dry_every_s"] in (900, 1800, 3600)       # the reading interval for this season
+    assert {k: body[k] for k in ("accepted", "duplicates", "modes")} == {"accepted": 2, "duplicates": 0, "modes": {}}
     r = client.post("/api/ingest", json={"readings": rows + rows[:1]}, headers={"Authorization": f"Bearer {key}"})
     assert r.json()["accepted"] == 0 and r.json()["duplicates"] == 3
     s = client.get("/api/sensors").json()["sensors"][0]
@@ -261,3 +269,15 @@ def test_ingest_infinity_is_no_echo_and_bad_body_does_not_crash(client):
     r = client.post("/api/ingest", content='{"readings":[{"basin_id":"T1","timestamp":"x","distance_cm":Infinity}]}',
                     headers=h)
     assert r.status_code == 422 and r.json()["detail"][0]["msg"]
+
+
+def test_all_digit_basin_id_stays_text(client):
+    setup_admin(client)
+    base = {"latitude": 45.4543, "longitude": -73.7761, "sensor_depth_mm": 400, "invert_depth_mm": 1400,
+            "diameter_mm": 610, "outlet_mm": 250, "sump_mm": 300, "has_trap": True}
+    assert client.post("/api/basins", json={**base, "basin_id": "7081852"}).status_code == 200
+    assert client.post("/api/basins", json={**base, "basin_id": "TEST-1"}).status_code == 200
+    assert client.delete("/api/basins/TEST-1").status_code == 200
+    ids = [b["id"] for b in client.get("/api/overview").json()["basins"]]
+    assert ids == ["7081852"]                                         # text, not the number 7081852 (it blanked the map)
+    assert client.post("/api/basins", json={**base, "basin_id": "FAR", "latitude": 0, "longitude": 0}).status_code == 422

@@ -28,7 +28,7 @@ RESOLVES = {"Cleaned / vacuumed", "No issue found"}
 def load():
     if not os.path.exists(LOG_FILE):
         return pd.DataFrame(columns=COLUMNS)
-    return pd.read_csv(LOG_FILE, parse_dates=["time"])
+    return pd.read_csv(LOG_FILE, parse_dates=["time"], dtype={"basin_id": str})
 
 
 def add(basin_id, time, action, sediment_mm=None, note=""):

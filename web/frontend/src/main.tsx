@@ -7,6 +7,7 @@ import Accounts from './pages/Accounts'
 import Basin from './pages/Basin'
 import Basins from './pages/Basins'
 import ChangePassword from './pages/ChangePassword'
+import CleaningList from './pages/CleaningList'
 import Crew from './pages/Crew'
 import Keys from './pages/Keys'
 import Overview from './pages/Overview'
@@ -30,6 +31,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/setup" element={<Setup />} />
           <Route path="/" element={<Inside><Overview /></Inside>} />
           <Route path="/run" element={<Inside><Run /></Inside>} />
+          <Route path="/run/list" element={<Inside><CleaningList /></Inside>} />
           <Route path="/crew" element={<Inside><Crew /></Inside>} />
           <Route path="/basins" element={<Inside><Basins /></Inside>} />
           <Route path="/basins/:id" element={<Inside><Basin /></Inside>} />

@@ -96,9 +96,9 @@ def _load_full(paths, mtimes):
     monitored, live, log_file = paths
     if monitored == MONITORED_FILE and not os.path.exists(MONITORED_FILE) and os.path.exists(OLD_USER_FILE):
         os.replace(OLD_USER_FILE, MONITORED_FILE)                     # carry over basins added before
-    basins = pd.read_csv(monitored, dtype={"municipal_id": str}) if os.path.exists(monitored) \
+    basins = pd.read_csv(monitored, dtype={"municipal_id": str, "basin_id": str}) if os.path.exists(monitored) \
         else pd.DataFrame(columns=["basin_id", "municipal_id", "latitude", "longitude"])
-    readings = (pd.read_csv(live, parse_dates=["timestamp"]) if os.path.exists(live)
+    readings = (pd.read_csv(live, parse_dates=["timestamp"], dtype={"basin_id": str}) if os.path.exists(live)
                 else pd.DataFrame(columns=READING_COLUMNS))
     readings["timestamp"] = pd.to_datetime(readings["timestamp"])
     if "received" in readings:                                        # demo files: when it reached the server
@@ -355,7 +355,7 @@ def save_monitored_basin(row, replace=False):
     """Add (or replace) one basin in data/monitored_basins.csv (the demo's copy in Pitch demo mode)."""
     path = files()["monitored"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    df = pd.read_csv(path, dtype={"municipal_id": str}) if os.path.exists(path) else pd.DataFrame()
+    df = pd.read_csv(path, dtype={"municipal_id": str, "basin_id": str}) if os.path.exists(path) else pd.DataFrame()
     if not df.empty and row["basin_id"] in set(df["basin_id"]):
         if not replace:
             raise ValueError("exists")
@@ -367,7 +367,7 @@ def save_monitored_basin(row, replace=False):
 
 def delete_monitored_basin(basin_id):
     path = files()["monitored"]
-    df = pd.read_csv(path, dtype={"municipal_id": str})
+    df = pd.read_csv(path, dtype={"municipal_id": str, "basin_id": str})
     df[df["basin_id"] != basin_id].to_csv(path, index=False)
     st.cache_data.clear()
 

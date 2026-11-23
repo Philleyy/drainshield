@@ -8,6 +8,7 @@ Everything under /api is JSON. Signed-in pages use the ds_session cookie; the se
 upload key instead (Authorization: Bearer dsk_...).
 """
 
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import urlparse
@@ -18,10 +19,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 
-from . import config, ingest, security, state
-from .db import as_utc, create_tables, engine, ingest_keys, users, utcnow
+from . import config, fr, ingest, security, state
+from .db import as_utc, create_tables, engine, ingest_keys, settings, users, utcnow
 
 ROLES = ("admin", "engineering", "crew", "demo")
 
@@ -330,15 +331,47 @@ def sensor_list(_u=Depends(current_user), conn=Depends(db)):
     return {"sensors": ingest.latest(conn), "now": utcnow().isoformat()}
 
 
+@app.delete("/api/sensors/{basin_id}")
+def sensor_remove(basin_id: str, u=Depends(current_user), conn=Depends(db)):
+    if u["role"] not in ("admin", "engineering"):
+        raise HTTPException(403, "Only administrators and engineering can remove sensors.")
+    if not ingest.remove(conn, basin_id):
+        raise HTTPException(404, "No such sensor.")
+    return {"ok": True}
+
+
 @app.get("/api/sensors/{basin_id}/readings")
 def sensor_readings(basin_id: str, limit: int = 200, _u=Depends(current_user), conn=Depends(db)):
     return {"readings": ingest.recent(conn, basin_id, max(1, min(limit, 2000)))}
 
 
 # ---------------------------------------------------------------------------- the pages (state.py does the work)
-def view(u=Depends(current_user), demo: bool = False, t: int = Query(0, ge=0, le=1439)):
-    """Which data a request looks at: live, or the pitch demo at minute t of its day. Demo accounts only see the demo."""
-    return {"demo": demo or u["role"] == "demo", "minute": t, "user": u}
+def view(u=Depends(current_user), demo: bool = False, t: int = Query(0, ge=0, le=1439),
+         lang: Literal["fr", "en"] = "fr"):
+    """Which data a request looks at: live, or the pitch demo at minute t of its day. Demo accounts only see the demo.
+    lang: the analysis code writes English; French (the default) is translated on the way out."""
+    return {"demo": demo or u["role"] == "demo", "minute": t, "user": u, "lang": lang}
+
+
+def out(v, data):
+    return fr.translate(data) if v["lang"] == "fr" else data
+
+
+_demo_answers = OrderedDict()
+
+
+def answer(v, name, make):
+    """out(v, make()), remembered in the demo: its day is scripted, so a minute with the same log always gives the
+    same answer, and one demo answer costs 1-2 s on the server's single CPU. Call inside state.use()."""
+    if not v["demo"]:
+        return out(v, make())
+    key = (name, v["lang"], state.data_store.data_key())          # data_key moves with the demo clock and its log
+    if key not in _demo_answers:
+        _demo_answers[key] = out(v, make())
+        if len(_demo_answers) > 300:
+            _demo_answers.popitem(last=False)
+    _demo_answers.move_to_end(key)
+    return _demo_answers[key]
 
 
 def may_change(v):
@@ -373,8 +406,8 @@ class BasinBody(BaseModel):
 
 
 @app.get("/api/demo")
-def demo_story(_u=Depends(current_user)):
-    return state.demo_story()
+def demo_story(v=Depends(view)):
+    return out(v, state.demo_story())
 
 
 @app.post("/api/demo/reset")
@@ -387,7 +420,7 @@ def demo_reset(_u=Depends(current_user), conn=Depends(db)):
 @app.get("/api/overview")
 def overview(v=Depends(view), conn=Depends(db)):
     with state.use(conn, v["demo"], v["minute"]) as when:
-        return state.overview(when)
+        return answer(v, "overview", lambda: state.overview(when))
 
 
 @app.get("/api/run")
@@ -395,7 +428,8 @@ def run(exclude: str = "", leave: str | None = Query(None, pattern=r"^\d\d:\d\d$
         conn=Depends(db)):
     with state.use(conn, v["demo"], v["minute"]) as when:
         _, _, rain, *_ = state.data_store.load_all()
-        return state.run_state(state.network(when), rain, when, [x for x in exclude.split(",") if x], leave)
+        skip = [x for x in exclude.split(",") if x]
+        return answer(v, ("run", exclude, leave), lambda: state.run_state(state.network(when), rain, when, skip, leave))
 
 
 @app.post("/api/run/send")
@@ -412,10 +446,22 @@ def run_send(body: RunBody, v=Depends(view), conn=Depends(db)):
 def basin_save(body: BasinBody, u=Depends(current_user), conn=Depends(db)):
     if u["role"] not in ("admin", "engineering"):
         raise HTTPException(403, "Only administrators and engineering can add basins.")
+    if not state.in_quebec(body.latitude, body.longitude):
+        raise HTTPException(422, "This position is outside Québec. Enter the basin's latitude and longitude, "
+                                 "e.g. 45.4468 and -73.7513 (0 and 0 means the position was left empty).")
     try:
         return {"warnings": state.save_basin(conn, body.model_dump())}
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+
+@app.delete("/api/basins/{basin_id}")
+def basin_remove(basin_id: str, u=Depends(current_user), conn=Depends(db)):
+    if u["role"] not in ("admin", "engineering"):
+        raise HTTPException(403, "Only administrators and engineering can remove basins.")
+    if not state.remove_basin(conn, basin_id):
+        raise HTTPException(404, "No such basin.")
+    return {"ok": True}
 
 
 @app.get("/api/city-basins")
@@ -427,10 +473,10 @@ def city_basins(_u=Depends(current_user)):
 @app.get("/api/basins/{basin_id}")
 def basin(basin_id: str, v=Depends(view), conn=Depends(db)):
     with state.use(conn, v["demo"], v["minute"]) as when:
-        out = state.basin_detail(basin_id, when)
-    if out is None:
+        detail = answer(v, ("basin", basin_id), lambda: state.basin_detail(basin_id, when))
+    if detail is None:
         raise HTTPException(404, "No such basin.")
-    return out
+    return detail
 
 
 @app.post("/api/basins/{basin_id}/log")
@@ -442,6 +488,30 @@ def basin_log(basin_id: str, body: LogBody, v=Depends(view), conn=Depends(db)):
         state.add_log(conn, v["demo"], when, basin_id, body.action,
                       body.sediment_mm if body.action == "Cleaned / vacuumed" else None, body.note, v["user"]["id"])
     return {"ok": True}
+
+
+class SettingsBody(BaseModel):
+    oncall_name: str = Field(default="", max_length=80)
+    oncall_phone: str = Field(default="", max_length=30, pattern=r"^[0-9+()\-. ]*$")
+
+
+SETTING_KEYS = ("oncall_name", "oncall_phone")
+
+
+@app.get("/api/settings")
+def get_settings(_u=Depends(current_user), conn=Depends(db)):
+    rows = dict(conn.execute(select(settings.c.key, settings.c.value)).all())
+    return {k: rows.get(k, "") for k in SETTING_KEYS}
+
+
+@app.put("/api/settings")
+def put_settings(body: SettingsBody, u=Depends(current_user), conn=Depends(db)):
+    if u["role"] not in ("admin", "engineering"):
+        raise HTTPException(403, "Only administrators and engineering can change the on-call contact.")
+    for k, v in body.model_dump().items():
+        conn.execute(delete(settings).where(settings.c.key == k))
+        conn.execute(insert(settings).values(key=k, value=v.strip()))
+    return get_settings(u, conn)
 
 
 @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])

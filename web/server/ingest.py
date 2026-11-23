@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 
-from . import config
+from . import config, season
 from .db import as_utc, readings, sensors, utcnow
 
 LOCAL = ZoneInfo(config.APP_TZ)
@@ -90,7 +90,9 @@ def store(conn, upload: Upload) -> dict:
             with_batt = [x for x in fresh if x["battery_v"] is not None]
             _update_sensor(conn, basin, max(fresh, key=lambda x: x["ts"]), len(fresh), now,
                            max(with_batt, key=lambda x: x["ts"])["battery_v"] if with_batt else None)
-    return {"accepted": added, "duplicates": duplicates, "modes": {}}
+    s = season.info(datetime.now(LOCAL))
+    return {"accepted": added, "duplicates": duplicates, "modes": {},
+            "season": {"key": s["key"], "dry_every_s": s["dry_every_min"] * 60}}
 
 
 def _update_sensor(conn, basin, latest, n_new, now, battery_v):
@@ -114,6 +116,13 @@ def latest(conn):
         out.append({**dict(r), "last_reading_at": _iso(r["last_reading_at"]),
                     "last_received_at": _iso(r["last_received_at"])})
     return out
+
+
+def remove(conn, basin):
+    """Forget a sensor and every reading it sent. Returns False if there was none."""
+    gone = conn.execute(delete(sensors).where(sensors.c.basin_id == basin)).rowcount
+    gone += conn.execute(delete(readings).where(readings.c.basin_id == basin)).rowcount
+    return gone > 0
 
 
 def recent(conn, basin, limit=200):

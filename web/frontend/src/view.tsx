@@ -1,7 +1,8 @@
 // Which data every page shows: live, or the pitch demo at one minute of its scripted day (shared by all pages).
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError } from './api'
 import { useAuth } from './auth'
+import { lang, locale, t } from './i18n'
 
 interface View {
   demo: boolean; locked: boolean; setDemo: (d: boolean) => void
@@ -55,6 +56,7 @@ export function ViewProvider({ children }: { children: ReactNode }) {
     url: (path, params = {}) => {
       const q = new URLSearchParams(params)
       if (demo) { q.set('demo', '1'); q.set('t', String(minute)) }
+      if (lang === 'en') q.set('lang', 'en')                                // the server answers in French by default
       return q.toString() ? `${path}?${q}` : path
     },
   }), [demo, locked, minute, setMinute, playing, dark, version])
@@ -67,25 +69,42 @@ export function useView() {
   return v
 }
 
-/** Loads a page's data for the current view; keeps showing the last answer while the next one loads. */
+/** Loads a page's data for the current view; keeps showing the last answer while the next one loads.
+ * One request at a time, latest wins: dragging the demo slider or playing it used to queue a request per step,
+ * each 1-2 s on the server, and the page fell further and further behind. */
 export function useData<T>(path: string, params?: Record<string, string>) {
   const { url, version } = useView()
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
   const target = url(path, params)
+  const wanted = useRef({ target, version })
+  const busy = useRef(false)
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => {
-    let current = true
-    api<T>(target)
-      .then(d => { if (current) { setData(d); setError('') } })
-      .catch(e => { if (current) setError(e instanceof ApiError ? e.message : 'Could not load the data.') })
-    return () => { current = false }
+    wanted.current = { target, version }
+    if (busy.current) return                                // the running loop picks up the newest wish
+    busy.current = true
+    void (async () => {
+      let done: { target: string; version: number } | null = null
+      while (alive.current && wanted.current !== done) {
+        done = wanted.current
+        try {
+          const d = await api<T>(done.target)
+          if (alive.current) { setData(d); setError('') }
+        } catch (e) {
+          if (alive.current && done === wanted.current) setError(e instanceof ApiError ? e.message : t('Could not load the data.'))
+        }
+      }
+      busy.current = false
+    })()
   }, [target, version])
   return { data, error }
 }
 
 export const hhmm = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
 export const clock = (iso: string | null) => (iso ? iso.slice(11, 16) : '')
-export const day = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+export const day = (iso: string) => new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 export const minutesBetween = (fromIso: string, toIso: string) => Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 60000)
 export function duration(min: number) {
   const h = Math.floor(min / 60)
@@ -98,27 +117,27 @@ interface Story { day: string; events: { minute: number; time: string; title: st
 export function ClockBar() {
   const { minute, setMinute, playing, setPlaying, refresh } = useView()
   const [story, setStory] = useState<Story | null>(null)
-  useEffect(() => { api<Story>('/demo').then(setStory).catch(() => setStory(null)) }, [])
+  useEffect(() => { api<Story>(lang === 'en' ? '/demo?lang=en' : '/demo').then(setStory).catch(() => setStory(null)) }, [])
   const event = story?.events.filter(e => e.minute <= minute).pop()
   return (
-    <section className="card clockbar no-print" aria-label="Pitch demo clock">
+    <section className="card clockbar no-print" aria-label={t('Pitch demo clock')}>
       <div style={{ flex: '1 1 320px' }}>
-        <div className="eyebrow">Pitch demo · {story?.day} · {hhmm(minute)}</div>
+        <div className="eyebrow">{t('Pitch demo')} · {story?.day} · {hhmm(minute)}</div>
         {event && <><b>{event.time} · {event.title}</b><p className="sub">{event.text}</p></>}
       </div>
       <div className="clock-controls">
-        <label htmlFor="demo-time" className="label">Time of day</label>
+        <label htmlFor="demo-time" className="label">{t('Time of day')}</label>
         <input id="demo-time" type="range" min={0} max={LAST} step={5} value={minute}
           onChange={e => setMinute(Number(e.target.value))} />
         <div className="row">
-          <button type="button" className="btn small primary" onClick={() => setPlaying(!playing)}>{playing ? 'Pause' : 'Play'}</button>
-          <label htmlFor="demo-jump" className="sr-only">Jump to a moment</label>
+          <button type="button" className="btn small primary" onClick={() => setPlaying(!playing)}>{playing ? t('Pause') : t('Play')}</button>
+          <label htmlFor="demo-jump" className="sr-only">{t('Jump to a moment')}</label>
           <select id="demo-jump" className="btn small" value="" onChange={e => { if (e.target.value) setMinute(Number(e.target.value)) }}>
-            <option value="">Jump to a moment…</option>
+            <option value="">{t('Jump to a moment…')}</option>
             {story?.events.map(e => <option key={e.minute} value={e.minute}>{e.time} · {e.title}</option>)}
           </select>
-          <button type="button" className="btn small" title="Remove what viewers clicked during the demo"
-            onClick={async () => { await api('/demo/reset', { body: {} }); refresh() }}>Reset</button>
+          <button type="button" className="btn small" title={t('Remove what viewers clicked during the demo')}
+            onClick={async () => { await api('/demo/reset', { body: {} }); refresh() }}>{t('Reset')}</button>
         </div>
       </div>
     </section>
