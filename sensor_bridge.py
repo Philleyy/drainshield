@@ -26,6 +26,7 @@ reading per interval: the median of what it received, to ignore false echoes.
 import argparse
 import csv
 import json
+import math
 import os
 import statistics
 import sys
@@ -83,7 +84,7 @@ def parse(line):
         parts = line.split(",")
         try:
             value = float(parts[1])
-            return "dist", (None if value != value else value)      # NaN -> None (no echo)
+            return "dist", (value if math.isfinite(value) else None)  # NaN / inf -> None (no echo)
         except ValueError:
             return "dist", None
     if line.lower().startswith("distance:"):

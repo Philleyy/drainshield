@@ -72,7 +72,7 @@ float medianCm(int &good) {
 // ---------- 2. tracking loop ----------
 void track(float meas, float dtMin) {
   if (isnan(meas)) return;                          // no echo: keep the last estimate
-  if (isnan(est)) { est = meas; return; }           // first reading
+  if (isnan(est) || dtMin <= 0) { est = meas; return; }  // first reading (dtMin 0 would divide by zero)
   float pred = est + rate * dtMin;                  // where we expect the water now
   float err = meas - pred;                          // the surprise
   if (fabs(err) > GATE_CM) {

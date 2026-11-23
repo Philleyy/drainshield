@@ -6,6 +6,7 @@ The same reading can arrive twice (a retry after a dropped connection): it is st
 (basin_id, timestamp). Timestamps without a time zone are local time (APP_TZ), as the bridges write them.
 """
 
+import math
 import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -33,6 +34,11 @@ class Reading(BaseModel):
     snr: float | None = None
     node: int | None = None
     index: int | None = None
+
+    @field_validator("distance_cm", "battery_v", "temp_c", "rssi", "snr", mode="before")
+    @classmethod
+    def _finite(cls, v):
+        return None if isinstance(v, float) and not math.isfinite(v) else v   # inf / nan = no value
 
     @field_validator("basin_id")
     @classmethod

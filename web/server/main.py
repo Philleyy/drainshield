@@ -13,6 +13,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -310,6 +311,13 @@ def revoke_key(key_id: str, _a=Depends(admin_user), conn=Depends(db)):
 
 
 # ---------------------------------------------------------------------------- sensor data
+@app.exception_handler(RequestValidationError)
+async def invalid_body(_request: Request, exc: RequestValidationError):
+    # same shape as FastAPI's default reply, without echoing the input (an inf in it made the reply crash)
+    return JSONResponse({"detail": [{"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]}
+                                    for e in exc.errors()]}, status_code=422)
+
+
 @app.post("/api/ingest")
 def upload_readings(body: ingest.Upload, request: Request, conn=Depends(db)):
     if security.check_ingest_key(conn, request.headers.get("authorization")) is None:

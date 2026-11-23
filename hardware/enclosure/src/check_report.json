@@ -1,0 +1,98 @@
+{
+ "parts": {
+  "body": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 38.7
+  },
+  "lid": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 10.8
+  },
+  "hood": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 56.9
+  },
+  "shroud": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 16.3
+  },
+  "tray_lower": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 5.4
+  },
+  "tray_upper": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 5.5
+  },
+  "bracket": {
+   "solids": 1,
+   "valid": true,
+   "volume_cm3": 15.3
+  }
+ },
+ "collisions": [],
+ "touching_ok": [],
+ "print_size_mm": {
+  "01_body": [
+   75.0,
+   54.1,
+   42.5
+  ],
+  "02_lid": [
+   75.0,
+   51.0,
+   3.0
+  ],
+  "03_hood": [
+   87.0,
+   68.5,
+   65.8
+  ],
+  "04_shroud": [
+   75.0,
+   53.5,
+   29.5
+  ],
+  "05_tray_lower": [
+   62.4,
+   45.4,
+   2.0
+  ],
+  "06_tray_upper": [
+   62.4,
+   45.4,
+   5.0
+  ],
+  "07_bracket": [
+   68.8,
+   9.9,
+   42.0
+  ],
+  "test_1_rail_coupon": [
+   75.0,
+   5.6,
+   22.5
+  ],
+  "test_2_window_1.5mm": [
+   30.0,
+   30.0,
+   1.5
+  ],
+  "test_3_window_2.0mm": [
+   30.0,
+   30.0,
+   2.0
+  ],
+  "test_4_window_3.0mm": [
+   30.0,
+   30.0,
+   3.0
+  ]
+ }
+}

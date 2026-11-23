@@ -94,7 +94,7 @@ def use(conn, demo, minute=0):
         else:
             export_live(conn)
             auto_close(conn)
-        yield data_store.now().floor("min")
+        yield data_store.now().floor("s")          # to the second: a reading shows as soon as it arrives
 
 
 _exported = None

@@ -41,9 +41,9 @@ export function ViewProvider({ children }: { children: ReactNode }) {
     const id = window.setInterval(() => setMinuteState(m => { if (m >= LAST) { setPlaying(false); return m } return m + 15 }), 1500)
     return () => window.clearInterval(id)
   }, [playing, demo])
-  useEffect(() => {                                                       // live data: look again every 30 s
+  useEffect(() => {                                                       // live data: look again every 5 s
     if (demo) return
-    const id = window.setInterval(() => setVersion(v => v + 1), 30_000)
+    const id = window.setInterval(() => setVersion(v => v + 1), 5_000)
     return () => window.clearInterval(id)
   }, [demo])
 

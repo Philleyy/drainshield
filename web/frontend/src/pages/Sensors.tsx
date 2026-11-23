@@ -38,7 +38,7 @@ export function flagText(flags: number | null) {
   return FLAG_TEXT.filter(([bit]) => (flags || 0) & bit).map(([, t]) => t).join(', ')
 }
 
-export function useSensors(everyMs = 15_000) {
+export function useSensors(everyMs = 5_000) {
   const [sensors, setSensors] = useState<SensorRow[] | null>(null)
   const [error, setError] = useState('')
   const load = useCallback(async () => {

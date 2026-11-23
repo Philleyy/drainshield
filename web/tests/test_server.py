@@ -240,7 +240,6 @@ def test_esp8266_bench_demo(client):
     assert b["category"] == "Normal" and "Learning" in b["priority"], b
     assert "not learned" in client.get("/api/basins/TEST-ESP").json()["water"]["text"]
     # bench set-up: outlet depth = sensor depth + what it reads to the table -> normal; a hand at 15 cm -> urgent
-    # (the site shows readings up to the start of the current minute, so these are 1-2 min old)
     client.post("/api/basins", json={"basin_id": "TEST-ESP", "latitude": 45.448, "longitude": -73.744,
                                      "sensor_depth_mm": 400, "invert_depth_mm": 400 + 426})
     assert client.get("/api/overview").json()["basins"][0]["category"] == "Normal"
@@ -249,3 +248,16 @@ def test_esp8266_bench_demo(client):
     client.post("/api/ingest", json={"readings": hand}, headers={"Authorization": f"Bearer {key}"})
     b = client.get("/api/overview").json()["basins"][0]
     assert b["category"] == "Urgent" and b["water"] == "0.55 m", (b["category"], b["priority"], b["water"])
+
+
+def test_ingest_infinity_is_no_echo_and_bad_body_does_not_crash(client):
+    setup_admin(client)
+    key = client.post("/api/keys", json={"name": "k"}).json()["key"]
+    h = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    body = '{"readings":[{"basin_id":"T1","timestamp":"2026-11-17T18:54:10","distance_cm":Infinity},' \
+           '{"basin_id":"T1","timestamp":"2026-11-17T18:54:15","distance_cm":183.7}]}'
+    r = client.post("/api/ingest", content=body, headers=h)                 # what the bridge sent tonight
+    assert r.status_code == 200 and r.json()["accepted"] == 2, r.text
+    r = client.post("/api/ingest", content='{"readings":[{"basin_id":"T1","timestamp":"x","distance_cm":Infinity}]}',
+                    headers=h)
+    assert r.status_code == 422 and r.json()["detail"][0]["msg"]
