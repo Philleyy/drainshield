@@ -1,11 +1,14 @@
 # DrainShield: handoff to Raph
 
-*Written Nov 26, 2026. Phil (Philippe Bordeleau) is handing the software side to Raph. This file describes **today's code**. Where the product is going (role picker, one sensor per zone, half-day batches, map first, French first) is in [REBUILD_SPEC.md](REBUILD_SPEC.md), whether you rebuild or refactor.*
+*Written Nov 26, 2026. Phil (Philippe Bordeleau) is handing the software side to Raph. This file describes **today's code**. Where the product is going (role picker, one sensor per zone, cleaning batches, winter sleep, map first, French first) is in [REBUILD_SPEC.md](REBUILD_SPEC.md).*
 
 ## 1. The short version
 
 - **You own the website.** You decide the stack, the structure, and what to rewrite. Phil handles the hardware, the municipalities, and the competition.
-- **A rewrite is allowed, but read the code first.** It's already a standard stack: FastAPI + PostgreSQL + React/TypeScript. The valuable part is the decision logic (section 4), not the framework.
+- **Phil's advice: look at what's built, then start from scratch and reuse parts of this code.** The new direction (zones, batches, role picker, three screens) is different enough that a fresh start will be cleaner. The valuable parts are the decision rules (section 4), the data files, the tests and the French text, not the website plumbing.
+
+![What to carry over](docs/handoff/reuse_map.svg)
+
 - **Hosting and domain are your call, with no rush.** The current site is free and works for demos. Hold off on buying a domain: the name "DrainShield" isn't final yet.
 - **The direction changed on Nov 26** after an interview with Chambly's public works foreman. Read section 2 of this file, then [REBUILD_SPEC.md](REBUILD_SPEC.md).
 - **The pitch demo and the judges' account were removed** from the code on Nov 26.
@@ -26,7 +29,9 @@ A sensor pod sits on the wall of a street catch basin (puisard), about 400 mm be
 
 **New direction (Nov 26), from Chambly's public works foreman:**
 - **Not a sensor in every basin.** Put one sensor per **zone** of basins with similar conditions: leafy streets, low points, near the outfall or river, a history of problems.
-- **Cleaning goes out in half-day batches.** Contractors such as Sani-Vac are expensive. Cleaning takes about 5 minutes per basin. The contractor works on paper; the foreman logs the result.
+- **Cleaning goes out in batches** of roughly half a day to a full day, never for a few scattered, non-critical basins. Contractors such as Sani-Vac are expensive. Cleaning takes about 5 minutes per basin. The contractor works on paper; the foreman logs the result.
+- **Sensors sleep in winter** (clogging risk is near zero) and wake with the snowmelt, without anyone going out.
+- **Zones are scored from data**: public lidar, flood history and OpenStreetMap first, then the city's office files. No field work for the city.
 - **The website follows:** a role picker instead of sign-in, a map-first page for the foreman and engineering, a very simple crew screen for phone and tablet, French first, and alert icons that use shape as well as colour.
 
 ![The map page in the new direction](docs/handoff/wire_main.svg)
@@ -36,13 +41,13 @@ A sensor pod sits on the wall of a street catch basin (puisard), about 400 mm be
 | Done | Not done / open |
 |---|---|
 | Web app live on Ample, with sign-in, roles, upload keys | Final sensor: **60 GHz radar (Acconeer A121/XM125)** is the assumption, but the code is still written around ultrasonic sensors |
-| Streamlit dashboard (original prototype, kept as a fallback) | Cellular (LTE) link not solved |
-| All 5,035 Dorval catch basins on the map (Ville de Montréal open data) | Battery life not bench-tested (target 5–10 years) |
+| Streamlit dashboard (original prototype, kept as a fallback) | Data link not chosen (LTE, LoRaWAN or Wi-Fi) |
+| All 5,035 Dorval catch basins on the map (Ville de Montréal open data) | Battery not bench-tested (3 years at first, 5–10 years as the goal) |
 | Pitch demo removed (Nov 26): the site shows live data only | Web app hasn't passed a full dry run yet |
 | Wireless prototype: Heltec LoRa nodes → USB receiver → laptop → website | Name not final; no domain |
-| ESP8266 Wi-Fi sketch posting straight to the website (being tested) | Sensor strategy: one per zone (decided Nov 26) |
+| ESP8266 Wi-Fi sketch posting straight to the website (being tested) | Sensor strategy: one per zone (decided Nov 26); pilot in Chambly: 2 sensors where basins rarely block, 2 where they often do |
 | Pre-storm predictions, truck route, crew view, French and English | Thresholds are first guesses, not tuned on real pilot data |
-| | Zones, half-day batches, role picker: designed, not built ([spec](REBUILD_SPEC.md)) |
+| | Zones, batches, role picker, winter sleep: designed, not built ([spec](REBUILD_SPEC.md)) |
 
 ### The screens, from now on
 
@@ -145,7 +150,7 @@ Today, accounts are invite-only: an admin creates them, and there's no sign-up p
 ## 7. Hardware context (it keeps changing)
 
 - **In the code now:** Arduino Uno + HC-SR04 over USB; Heltec WiFi LoRa 32 V3 + A02YYUW ultrasonic nodes with a USB receiver (flash ring buffer, ACK carries the mode); ESP8266 + HC-SR04 over Wi-Fi.
-- **Decided since:** 60 GHz radar (Acconeer A121/XM125 assumed), battery powered, 5–10 year battery target, pod slides onto a wall bracket and is placed and removed from street level, waterproof.
+- **Decided since:** 60 GHz radar (Acconeer A121/XM125 assumed), battery powered (3 years at first, 5–10 years as the goal), pod slides onto a wall bracket and is placed and removed from street level, waterproof, must survive winter. It sleeps in winter and wakes with the snowmelt; pods are not removed for the winter.
 - **Heads-up:** the claude.ai project brief still describes an Arduino MKR WAN 1310 + DYP-A02YY ultrasonic. That's out of date.
 
 ## 8. Known shortcuts (marked `shortcut:` in the code)
@@ -187,6 +192,6 @@ Settings are environment variables only (`DATABASE_URL`, `SETUP_TOKEN`, `COOKIE_
 2. **Run the tests:** `python -m pytest -q tests` in the repo root, then `cd web && python -m pytest -q`.
 3. **Run the web app locally** and feed it a bench sensor (`sensor_bridge.py` or the ESP8266 sketch). There is no demo data any more.
 4. **Read the docstrings** of `processing.py`, `predictive.py` and `web/server/state.py`. They explain the *why*.
-5. **Decide:** keep and refactor, or rebuild from [REBUILD_SPEC.md](REBUILD_SPEC.md).
+5. **Start fresh** from [REBUILD_SPEC.md](REBUILD_SPEC.md), pulling in the pieces in section 1's picture.
 
 **Ask Phil about:** how zones should be drawn in practice, which city data he can get (sewer network, cleaning records), the L'Assomption demonstration, and anything in the "open" column of section 3.
