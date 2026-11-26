@@ -39,7 +39,7 @@ export async function api<T = unknown>(path: string, options: { method?: string;
   return body as T
 }
 
-export type Role = 'admin' | 'engineering' | 'crew' | 'demo'
+export type Role = 'admin' | 'engineering' | 'crew'
 
 export interface User {
   id: number
@@ -55,7 +55,6 @@ export const ROLE_LABEL: Record<Role, string> = {
   admin: t('Administrator'),
   engineering: t('Engineering'),
   crew: t('Crew'),
-  demo: t('Demo (judges)'),
 }
 
 export function initials(name: string, email: string) {

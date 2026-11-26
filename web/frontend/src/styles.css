@@ -182,15 +182,9 @@ pre { background: #14202b; color: #e6edf6; padding: 12px 14px; border-radius: 10
   .sidebar .brand { padding-bottom: 6px; flex-basis: 100%; }
 }
 
-/* ---------- demo clock, overview, basin page */
+/* ---------- overview, basin page */
 .split { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
 .sr-only { position: absolute; left: -9999px; }
-.clockbar { display: flex; flex-wrap: wrap; gap: var(--s3) var(--s5); align-items: center; padding: var(--s3) var(--s4); background: var(--accent-tint);
-  border-color: var(--accent-border); border-left: 4px solid var(--accent); }
-.clockbar .sub { margin: 2px 0 0; font-size: 13px; }
-.clock-controls { flex: 1 1 260px; min-width: 0; max-width: 440px; display: flex; flex-direction: column; gap: 8px; }
-.clock-controls input[type=range] { width: 100%; accent-color: var(--accent); height: 28px; }
-.clock-controls select { flex: 1 1 0; min-width: 0; width: 0; font-weight: 500; }
 .segmented { display: flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; margin: 4px 0; }
 .segmented button { flex: 1; min-height: 34px; border: 0; background: transparent; font-size: 13px; cursor: pointer; color: var(--ink-2); }
 .segmented button[aria-pressed=true] { background: var(--ink); color: var(--surface); font-weight: 600; }

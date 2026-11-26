@@ -13,12 +13,11 @@ Standard FastAPI + PostgreSQL + React, nothing specific to Ample, so it can move
 ## Where the pages get their numbers
 
 `server/state.py` does not redo any maths. It imports the same files the Streamlit dashboard uses
-(`processing.py`, `data_store.py`, `predictive.py`, `route_optimizer.py`, `weather.py`, `demo_scenario.py`
+(`processing.py`, `data_store.py`, `predictive.py`, `route_optimizer.py`, `weather.py`
 in the repo root), so the website and the dashboard always agree. On the host those files sit next to
 `server/`; on a laptop they are found one folder up.
 
-* **Live** shows what sensors uploaded (database). **Pitch demo** replays the scripted 24-hour storm day;
-  both are chosen with the Data switch in the menu.
+* The pages show what the sensors uploaded (database). The pitch demo was removed on Nov 26, 2026.
 * A pre-storm run is not a separate table: "Send to crew" writes one *Crew dispatched* log entry per stop,
   and the crew view reads them back.
 * Nobody taps "cleaned": when the water drops well below the outlet (the vacuum truck emptied the sump),

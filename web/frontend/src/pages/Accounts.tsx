@@ -17,7 +17,6 @@ const ROLE_HELP: Record<Role, string> = {
   admin: 'everything, plus accounts and upload keys',
   engineering: 'all pages and engineering detail',
   crew: 'field view: runs and basins',
-  demo: 'for judges: the pitch demo',
 }
 
 export default function Accounts() {

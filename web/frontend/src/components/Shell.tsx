@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { initials, ROLE_LABEL } from '../api'
 import { useAuth } from '../auth'
 import { lang, setLang, t } from '../i18n'
-import { ClockBar, useView } from '../view'
+import { useView } from '../view'
 
 const icon = {
   overview: <path d="M3 13h4l3-8 4 14 3-6h4" />,
@@ -45,7 +45,7 @@ function Segmented({ label, options, value, onChange }: { label: string; options
 
 export default function Shell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth()
-  const { demo, locked, setDemo, dark, setDark } = useView()
+  const { dark, setDark } = useView()
   const navigate = useNavigate()
   if (!user) return null
   const link = ({ isActive }: { isActive: boolean }) => `nav-link${isActive ? ' active' : ''}`
@@ -68,8 +68,6 @@ export default function Shell({ children }: { children: ReactNode }) {
           <NavLink to="/admin/keys" className={link}><Icon name="key" />{t('Sensor upload keys')}</NavLink>
         </>}
         <div className="grow" />
-        {!locked && <Segmented label={t('Data')} value={demo ? 'demo' : 'live'} onChange={v => setDemo(v === 'demo')}
-          options={[['live', t('Live')], ['demo', t('Pitch demo')]]} />}
         <Segmented label={t('Theme')} value={dark ? 'dark' : 'light'} onChange={v => setDark(v === 'dark')}
           options={[['light', t('Light')], ['dark', t('Dark')]]} />
         <Segmented label={t('Language')} value={lang} onChange={v => { if (v !== lang) setLang(v as 'fr' | 'en') }}
@@ -83,7 +81,6 @@ export default function Shell({ children }: { children: ReactNode }) {
         </div>
       </nav>
       <main className="content">
-        {demo && <ClockBar />}
         {children}
       </main>
     </div>

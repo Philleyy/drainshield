@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { useAuth } from '../auth'
 import { num, plural, t } from '../i18n'
-import { useView } from '../view'
 
 export interface Alert { id: string; address: string; kind: 'backing_up' | 'high' | 'grate_suspect'; water: string; neighbours?: string[] }
 export interface Storm { raining: boolean; alerts: Alert[] }
@@ -50,10 +49,9 @@ function OnCallForm({ value, onSaved }: { value: OnCall; onSaved: (v: OnCall) =>
 
 export default function StormPanel({ storm }: { storm: Storm }) {
   const { user } = useAuth()
-  const { demo } = useView()
   const [onCall, setOnCall] = useState<OnCall | null>(null)
   useEffect(() => { api<OnCall>('/settings').then(setOnCall).catch(() => setOnCall(null)) }, [])
-  const mayEdit = !demo && (user?.role === 'admin' || user?.role === 'engineering')
+  const mayEdit = user?.role === 'admin' || user?.role === 'engineering'
   const phone = onCall?.oncall_phone || ''
   const all = storm.alerts.map(smsText).join('\n')
 

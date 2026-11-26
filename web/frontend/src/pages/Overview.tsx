@@ -103,7 +103,7 @@ export default function Overview() {
       {data.basins.length === 0 ? (
         <section className="card">
           <h2>{t('No monitored basin yet')}</h2>
-          <p className="sub">{t('Add a basin under Basins, then start a bridge with an upload key so its sensor sends readings here. To see the product with data, switch Data to Pitch demo in the menu.')}</p>
+          <p className="sub">{t('Add a basin under Basins, then start a bridge with an upload key so its sensor sends readings here.')}</p>
         </section>
       ) : <>
         <div className="map-layout">

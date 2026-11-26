@@ -12,10 +12,6 @@ Loads everything the dashboard needs and keeps the selected basin shared between
 
 Rain comes from the real Environment Canada GEM model (past 7 days + forecast) through
 Open-Meteo. Without internet, the rain-based features simply switch off.
-
-PITCH DEMO MODE (sidebar "Data: Pitch demo"): the same pages read data/demo/ instead (a scripted 24-hour day,
-demo_scenario.py), "now" is the demo clock, readings appear when they were received, and the rain is the
-forecast Environment Canada had issued by that minute.
 """
 
 import json
@@ -24,7 +20,6 @@ import os
 import pandas as pd
 import streamlit as st
 
-import demo_scenario
 import maintenance
 import processing as proc
 import weather
@@ -39,37 +34,16 @@ STATUS_FILE = os.path.join(DATA, "sensor_status.json")
 READING_COLUMNS = ["basin_id", "timestamp", "distance_cm", "battery_v"]
 DEFAULT_INTERVAL_S = 5
 LIVE_LOG_FILE = maintenance.LOG_FILE
-DEMO_LABEL = "Pitch demo"
 MODE_EVERY = {"DRY": "30 min", "WATCH": "5 min", "STORM": "60 s"}
 REC_ICED = 0x08
 
 
-def demo_on():
-    """True when the sidebar's Data switch is on "Pitch demo"."""
-    try:
-        return st.session_state.get("data_mode") == DEMO_LABEL
-    except Exception:                                   # outside a Streamlit run
-        return False
-
-
 def files():
-    """The files the dashboard reads right now (the real ones, or the demo's)."""
-    if demo_on():
-        f = demo_scenario.FILES
-        out = {"monitored": f["monitored"], "live": f["live"], "settings": f["settings"], "status": f["status"],
-               "log": f["log"]}
-    else:
-        out = {"monitored": MONITORED_FILE, "live": LIVE_FILE, "settings": SETTINGS_FILE, "status": STATUS_FILE,
-               "log": LIVE_LOG_FILE}
-    maintenance.LOG_FILE = out["log"]                 # the maintenance log follows the same switch
+    """The files the dashboard reads."""
+    out = {"monitored": MONITORED_FILE, "live": LIVE_FILE, "settings": SETTINGS_FILE, "status": STATUS_FILE,
+           "log": LIVE_LOG_FILE}
+    maintenance.LOG_FILE = out["log"]
     return out
-
-
-def demo_minute():
-    try:
-        return int(st.session_state.get("demo_t", 0))
-    except Exception:
-        return 0
 
 
 def _mtime(path):
@@ -77,18 +51,15 @@ def _mtime(path):
 
 
 def now():
-    """The current local time, or the demo clock in Pitch demo mode."""
-    if demo_on():
-        return demo_scenario.DAY + pd.Timedelta(minutes=demo_minute())
+    """The current local time."""
     return pd.Timestamp.now().floor("s")
 
 
 def data_key():
-    """Changes whenever a basin file or the readings change (used to refresh caches), or the demo clock moves."""
+    """Changes whenever a basin file or the readings change (used to refresh caches)."""
     f = files()
     return ((f["monitored"], f["live"], f["log"]),
-            (_mtime(f["monitored"]), _mtime(f["live"]), _mtime(REGISTRY_FILE), _mtime(f["log"])),
-            now() if demo_on() else None)
+            (_mtime(f["monitored"]), _mtime(f["live"]), _mtime(REGISTRY_FILE), _mtime(f["log"])))
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
@@ -101,8 +72,6 @@ def _load_full(paths, mtimes):
     readings = (pd.read_csv(live, parse_dates=["timestamp"], dtype={"basin_id": str}) if os.path.exists(live)
                 else pd.DataFrame(columns=READING_COLUMNS))
     readings["timestamp"] = pd.to_datetime(readings["timestamp"])
-    if "received" in readings:                                        # demo files: when it reached the server
-        readings["received"] = pd.to_datetime(readings["received"])
     readings["distance_cm"] = pd.to_numeric(readings["distance_cm"], errors="coerce")
     readings["battery_v"] = pd.to_numeric(readings["battery_v"], errors="coerce")
     if not basins.empty and "sensor_height_cm" in basins:      # learn each sensor's height from the water
@@ -113,29 +82,11 @@ def _load_full(paths, mtimes):
     return basins, readings
 
 
-@st.cache_data(show_spinner=False, max_entries=8)
-def _load(key):
-    paths, mtimes, clock = key
-    basins, readings = _load_full(paths, mtimes)
-    if clock is not None and "received" in readings:                  # demo: only what had arrived by then
-        readings = readings[readings["received"] <= clock]
-    return basins, readings
-
-
-@st.cache_data(show_spinner=False, max_entries=8)
-def _demo_rain(clock, mtime):
-    actual, minute, forecasts = demo_scenario.load_rain()
-    return demo_scenario.rain_as_of(clock, actual, forecasts, minute)
-
-
 def load_all():
     """(monitored basins, sensor readings, rain, rain events, truth) — truth is always empty now."""
-    basins, readings = _load(data_key())
-    if demo_on():
-        rain = _demo_rain(now(), _mtime(demo_scenario.FILES["rain"]))
-    else:
-        lat, lon = center()
-        rain = weather.rain_series(round(lat, 3), round(lon, 3))
+    basins, readings = _load_full(*data_key())
+    lat, lon = center()
+    rain = weather.rain_series(round(lat, 3), round(lon, 3))
     return basins, readings, rain, proc.rain_events(rain), pd.DataFrame()
 
 
@@ -190,7 +141,7 @@ def basin_row(basins, basin_id):
 
 @st.cache_data(show_spinner=False)
 def levels_for(key, basin_id):
-    basins, readings = _load(key)
+    basins, readings = _load_full(*key)
     return proc.water_levels(readings.dropna(subset=["distance_cm"]), basin_row(basins, basin_id))
 
 
@@ -214,7 +165,7 @@ def entries_for(basin_id, when):
 
 def last_reading_info(basin_id, when):
     """What the sensor said in its LAST message (even one without a level): flags, mode, temperature.
-    Demo files carry them per reading; live, lora_bridge.py writes them to sensor_status.json."""
+    The readings carry them when the website exported them; otherwise lora_bridge.py writes sensor_status.json."""
     _, readings, *_ = load_all()
     info = {"iced": False, "mode": None, "temp_c": None, "received": None}
     if "flags" in readings:
@@ -352,7 +303,7 @@ def select_basin(basin_id):
 # Monitored basins
 # ---------------------------------------------------------------------------
 def save_monitored_basin(row, replace=False):
-    """Add (or replace) one basin in data/monitored_basins.csv (the demo's copy in Pitch demo mode)."""
+    """Add (or replace) one basin in data/monitored_basins.csv."""
     path = files()["monitored"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     df = pd.read_csv(path, dtype={"municipal_id": str, "basin_id": str}) if os.path.exists(path) else pd.DataFrame()
