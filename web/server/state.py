@@ -2,11 +2,10 @@
 state.py: what the pages show, computed by the SAME analysis code as the Streamlit dashboard
 ---------------------------------------------------------------------------------------------
 Nothing is re-implemented here: processing.py (drain times, status), data_store.py (triage), predictive.py,
-route_optimizer.py, weather.py and demo_scenario.py are imported as they are. Two things make that possible:
+route_optimizer.py and weather.py are imported as they are. Two things make that possible:
 
 * shim/streamlit.py stands in for Streamlit (those modules only use its cache and session state);
-* data_store.py reads CSV files, so in live mode the database is copied to data/web/*.csv when it changes.
-  In demo mode it reads data/demo/ at a demo clock, exactly like the dashboard's "Pitch demo".
+* data_store.py reads CSV files, so the database is copied to data/web/*.csv when it changes.
 
 Those modules keep their state in module globals (which files, what time), so every computation runs
 under one lock, one request at a time. shortcut: fine for a pilot; give each request its own state before
@@ -41,7 +40,6 @@ if hasattr(time, "tzset"):
 import streamlit as st                   # noqa: E402  (the shim)
 import basin_model as bm                 # noqa: E402
 import data_store                        # noqa: E402
-import demo_scenario                     # noqa: E402
 import maintenance                       # noqa: E402
 import predictive                        # noqa: E402
 import processing as proc                # noqa: E402
@@ -84,17 +82,11 @@ def sector(address):
 
 # ---------------------------------------------------------------------------- which data, what time
 @contextmanager
-def use(conn, demo, minute=0):
-    """Point the analysis code at the demo (at a demo clock) or at the live data. Yields the time 'now'."""
+def use(conn):
+    """Bring the analysis code's files up to date with the database. Yields the time 'now'."""
     with LOCK:
-        st.session_state.update(data_mode=data_store.DEMO_LABEL if demo else "Live", demo_t=int(minute))
-        if demo:
-            if not demo_scenario.ready():
-                demo_scenario.build(pd.read_csv(HERE / "demo_registry.csv", dtype={"municipal_id": str}))
-                st.cache_data.clear()
-        else:
-            export_live(conn)
-            auto_close(conn)
+        export_live(conn)
+        auto_close(conn)
         now = data_store.now().floor("s")            # to the second: a reading shows as soon as it arrives
         weather.HEAVY_RAIN_MM = season.info(now)["heavy_mm"]      # spring and fall: smaller storms count
         yield now
@@ -133,14 +125,10 @@ def export_live(conn):
     _exported = key
 
 
-def add_log(conn, demo, when, basin_id, action, sediment_mm=None, note="", user_id=None):
-    if demo:                                 # the demo's own log file, at the demo clock (shared by all viewers)
-        data_store.files()
-        maintenance.add(basin_id, when, action, sediment_mm, note)
-    else:
-        conn.execute(insert(maint_t).values(basin_id=basin_id, at=utcnow(), action=action,
-                                            sediment_mm=sediment_mm, note=note, user_id=user_id))
-        export_live(conn)
+def add_log(conn, when, basin_id, action, sediment_mm=None, note="", user_id=None):
+    conn.execute(insert(maint_t).values(basin_id=basin_id, at=utcnow(), action=action,
+                                        sediment_mm=sediment_mm, note=note, user_id=user_id))
+    export_live(conn)
 
 
 # ---------------------------------------------------------------------------- issue progress + automatic close-out
@@ -412,14 +400,14 @@ def run_state(net, rain, when, exclude=(), leave=None):
     return {"suggested": suggested_run(net, rain, when, tuple(exclude), leave), "sent": sent_run(net, when)}
 
 
-def send_run(conn, demo, when, exclude, leave, user_id):
+def send_run(conn, when, exclude, leave, user_id):
     _, _, rain, *_ = data_store.load_all()
     plan = suggested_run(network(when), rain, when, tuple(exclude), leave)
     if plan is None:
         raise ValueError("No basin to send a crew to.")
     n = len(plan["stops"])
     for s in plan["stops"]:
-        add_log(conn, demo, when, s["id"], "Crew dispatched",
+        add_log(conn, when, s["id"], "Crew dispatched",
                 note=f"Pre-storm run · stop {s['stop']} of {n} · arrive {s['arrive']} · {s['task']}", user_id=user_id)
     return n
 
@@ -538,9 +526,3 @@ def city_basins():
         reg = reg.assign(tier_label=reg["tier_label"].where(reg["tier"].isin(list("ABCDEF"))))
     rows = reg[cols].astype(object).where(reg[cols].notna(), None)
     return {"columns": cols, "rows": rows.values.tolist()}
-
-
-def demo_story():
-    return {"day": demo_scenario.DAY.strftime("%a %b %d"),
-            "events": [{"minute": int(t[:2]) * 60 + int(t[3:]), "time": t, "title": title, "text": text}
-                       for t, title, _, text in demo_scenario.EVENTS]}

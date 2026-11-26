@@ -98,7 +98,7 @@ function AddBasin({ onSaved, cityId, onPreview }: { onSaved: () => void; cityId:
 
 export default function Basins() {
   const { data, error } = useData<OverviewData>('/overview')
-  const { demo, refresh } = useView()
+  const { refresh } = useView()
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
   const cityId = params.get('city')
@@ -107,7 +107,7 @@ export default function Basins() {
   const [preview, setPreview] = useState<{ lat: number; lon: number } | null>(null)
   const [city, setCity] = useState<CityBasin[]>([])
   useEffect(() => { if (cityId) setAdding(true) }, [cityId])
-  const mayAdd = !demo && (user?.role === 'admin' || user?.role === 'engineering')
+  const mayAdd = user?.role === 'admin' || user?.role === 'engineering'
   const form = mayAdd && (adding || data?.basins.length === 0)
   useEffect(() => { if (form) cityBasins().then(setCity).catch(() => setCity([])) }, [form])
   if (error) return <div className="notice error" role="alert">{error}</div>
@@ -119,7 +119,6 @@ export default function Basins() {
       <div className="page-head">
         <div><h1>{t('Basins')}</h1><p className="sub">{plural(data.basins.length, '{n} monitored basin, most urgent first. Click one for its detail.', '{n} monitored basins, most urgent first. Click one for its detail.')}</p></div>
       </div>
-      {demo && <p className="sub">{t('Basins are added in Live data. The pitch demo always shows the 12 scripted pilot basins.')}</p>}
       <div className="map-layout">
         {form ? (
           <aside className="card side-form" aria-label={t('Add a basin')}>

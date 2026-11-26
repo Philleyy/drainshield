@@ -8,7 +8,6 @@ Everything under /api is JSON. Signed-in pages use the ds_session cookie; the se
 upload key instead (Authorization: Bearer dsk_...).
 """
 
-from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import urlparse
@@ -24,7 +23,7 @@ from sqlalchemy import delete, func, insert, select, update
 from . import config, fr, ingest, security, state
 from .db import as_utc, create_tables, engine, ingest_keys, settings, users, utcnow
 
-ROLES = ("admin", "engineering", "crew", "demo")
+ROLES = ("admin", "engineering", "crew")     # the "demo" (judges) role was retired with the pitch demo
 
 
 @asynccontextmanager
@@ -94,7 +93,7 @@ def public_user(u) -> dict:
 # ---------------------------------------------------------------------------- who is signed in
 def _session_user(request: Request, conn, allow_pending_password: bool):
     u = security.user_for_session(conn, request.cookies.get(config.SESSION_COOKIE))
-    if u is None:
+    if u is None or u["role"] not in ROLES:
         raise HTTPException(401, "Please sign in.")
     if u["must_change_password"] and not allow_pending_password:
         raise HTTPException(403, "password_change_required")
@@ -148,12 +147,12 @@ class PasswordBody(BaseModel):
 
 class NewUserBody(Email):
     name: str = Field(min_length=1, max_length=120)
-    role: Literal["admin", "engineering", "crew", "demo"]
+    role: Literal["admin", "engineering", "crew"]
 
 
 class UserPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    role: Literal["admin", "engineering", "crew", "demo"] | None = None
+    role: Literal["admin", "engineering", "crew"] | None = None
     active: bool | None = None
 
 
@@ -202,7 +201,7 @@ def login(body: LoginBody, request: Request, response: Response, conn=Depends(db
         raise HTTPException(429, f"Too many attempts. Try again in {config.LOGIN_WINDOW_MIN} minutes.")
     u = conn.execute(select(users).where(users.c.email == body.email)).mappings().first()
     ok = security.verify_password(u["password_hash"] if u else None, body.password)
-    if not ok or not u["active"]:
+    if not ok or not u["active"] or u["role"] not in ROLES:
         security.limiter.failed(body.email, ip)
         raise HTTPException(401, "Wrong email or password.")
     security.limiter.succeeded(body.email)
@@ -346,37 +345,14 @@ def sensor_readings(basin_id: str, limit: int = 200, _u=Depends(current_user), c
 
 
 # ---------------------------------------------------------------------------- the pages (state.py does the work)
-def view(u=Depends(current_user), demo: bool = False, t: int = Query(0, ge=0, le=1439),
-         lang: Literal["fr", "en"] = "fr"):
-    """Which data a request looks at: live, or the pitch demo at minute t of its day. Demo accounts only see the demo.
-    lang: the analysis code writes English; French (the default) is translated on the way out."""
-    return {"demo": demo or u["role"] == "demo", "minute": t, "user": u, "lang": lang}
+def view(u=Depends(current_user), lang: Literal["fr", "en"] = "fr"):
+    """Who is asking, in which language: the analysis code writes English; French (the default) is translated
+    on the way out."""
+    return {"user": u, "lang": lang}
 
 
 def out(v, data):
     return fr.translate(data) if v["lang"] == "fr" else data
-
-
-_demo_answers = OrderedDict()
-
-
-def answer(v, name, make):
-    """out(v, make()), remembered in the demo: its day is scripted, so a minute with the same log always gives the
-    same answer, and one demo answer costs 1-2 s on the server's single CPU. Call inside state.use()."""
-    if not v["demo"]:
-        return out(v, make())
-    key = (name, v["lang"], state.data_store.data_key())          # data_key moves with the demo clock and its log
-    if key not in _demo_answers:
-        _demo_answers[key] = out(v, make())
-        if len(_demo_answers) > 300:
-            _demo_answers.popitem(last=False)
-    _demo_answers.move_to_end(key)
-    return _demo_answers[key]
-
-
-def may_change(v):
-    if not v["demo"] and v["user"]["role"] == "demo":
-        raise HTTPException(403, "Demo accounts can't change live data.")
 
 
 class LogBody(BaseModel):
@@ -405,39 +381,26 @@ class BasinBody(BaseModel):
     has_trap: bool = True
 
 
-@app.get("/api/demo")
-def demo_story(v=Depends(view)):
-    return out(v, state.demo_story())
-
-
-@app.post("/api/demo/reset")
-def demo_reset(_u=Depends(current_user), conn=Depends(db)):
-    with state.use(conn, True):                 # builds the demo files first if they aren't there yet
-        state.demo_scenario.reset_log(True)
-    return {"ok": True}
-
-
 @app.get("/api/overview")
 def overview(v=Depends(view), conn=Depends(db)):
-    with state.use(conn, v["demo"], v["minute"]) as when:
-        return answer(v, "overview", lambda: state.overview(when))
+    with state.use(conn) as when:
+        return out(v, state.overview(when))
 
 
 @app.get("/api/run")
 def run(exclude: str = "", leave: str | None = Query(None, pattern=r"^\d\d:\d\d$"), v=Depends(view),
         conn=Depends(db)):
-    with state.use(conn, v["demo"], v["minute"]) as when:
+    with state.use(conn) as when:
         _, _, rain, *_ = state.data_store.load_all()
         skip = [x for x in exclude.split(",") if x]
-        return answer(v, ("run", exclude, leave), lambda: state.run_state(state.network(when), rain, when, skip, leave))
+        return out(v, state.run_state(state.network(when), rain, when, skip, leave))
 
 
 @app.post("/api/run/send")
 def run_send(body: RunBody, v=Depends(view), conn=Depends(db)):
-    may_change(v)
-    with state.use(conn, v["demo"], v["minute"]) as when:
+    with state.use(conn) as when:
         try:
-            return {"stops": state.send_run(conn, v["demo"], when, body.exclude, body.leave, v["user"]["id"])}
+            return {"stops": state.send_run(conn, when, body.exclude, body.leave, v["user"]["id"])}
         except ValueError as e:
             raise HTTPException(409, str(e))
 
@@ -472,8 +435,9 @@ def city_basins(_u=Depends(current_user)):
 
 @app.get("/api/basins/{basin_id}")
 def basin(basin_id: str, v=Depends(view), conn=Depends(db)):
-    with state.use(conn, v["demo"], v["minute"]) as when:
-        detail = answer(v, ("basin", basin_id), lambda: state.basin_detail(basin_id, when))
+    with state.use(conn) as when:
+        detail = state.basin_detail(basin_id, when)
+        detail = None if detail is None else out(v, detail)
     if detail is None:
         raise HTTPException(404, "No such basin.")
     return detail
@@ -481,11 +445,10 @@ def basin(basin_id: str, v=Depends(view), conn=Depends(db)):
 
 @app.post("/api/basins/{basin_id}/log")
 def basin_log(basin_id: str, body: LogBody, v=Depends(view), conn=Depends(db)):
-    may_change(v)
-    with state.use(conn, v["demo"], v["minute"]) as when:
+    with state.use(conn) as when:
         if state.basin_detail(basin_id, when) is None:
             raise HTTPException(404, "No such basin.")
-        state.add_log(conn, v["demo"], when, basin_id, body.action,
+        state.add_log(conn, when, basin_id, body.action,
                       body.sediment_mm if body.action == "Cleaned / vacuumed" else None, body.note, v["user"]["id"])
     return {"ok": True}
 

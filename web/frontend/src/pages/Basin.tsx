@@ -66,10 +66,10 @@ function Activity({ log, storms, children }: { log: Data['log']; storms: Data['s
 export default function Basin() {
   const { id = '' } = useParams()
   const { data: d, error } = useData<Data>(`/basins/${encodeURIComponent(id)}`)
-  const { url, refresh, demo } = useView()
+  const { url, refresh } = useView()
   const { user } = useAuth()
   const navigate = useNavigate()
-  const mayRemove = !demo && (user?.role === 'admin' || user?.role === 'engineering')
+  const mayRemove = user?.role === 'admin' || user?.role === 'engineering'
   async function remove() {
     if (!window.confirm(t('Remove basin {id}? Its settings and maintenance log are deleted for good.', { id }))) return
     try { await api(`/basins/${encodeURIComponent(id)}`, { method: 'DELETE' }); navigate('/basins') }

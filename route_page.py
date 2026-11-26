@@ -29,11 +29,6 @@ st.caption("Basins to clean, in the order that takes the least time from the pub
 # ---------------------------------------------------------------------------
 # Which basins
 # ---------------------------------------------------------------------------
-SENSORS, DEMO = "Basins flagged by DrainShield sensors", "Demo: the 10 proposed pilot sites (no sensor data)"
-source = st.radio("Basins to visit", [SENSORS, DEMO], horizontal=True,
-                  help="The demo set shows the routing on real Dorval basins before sensors are installed.")
-
-
 def sensor_stops():
     df = data_store.network_status(data_store.data_key(), data_store.log_key(), now)
     rows = []
@@ -58,28 +53,13 @@ def sensor_stops():
                                        "reason"])
 
 
-def demo_stops():
-    reg = data_store.municipal_basins()
-    if "pilot_role" not in reg:
-        return pd.DataFrame()
-    a = reg[reg["pilot_role"] == "anchor"].sort_values("score", ascending=False).copy()
-    a["basin_id"] = "#" + a["municipal_id"].astype(str)
-    a["category"] = ["Urgent" if i < 3 else "Inspect" for i in range(len(a))]
-    a["priority"] = a["category"].map({"Urgent": "Demo: shown as urgent", "Inspect": "Demo: shown as inspect"})
-    a["reason"] = "Pilot anchor, tier " + a["tier"].astype(str)
-    return a[["basin_id", "address", "latitude", "longitude", "category", "priority", "reason"]]
-
-
-stops = sensor_stops() if source == SENSORS else demo_stops()
-if source == DEMO:
-    st.info("Demo set: the 10 pilot anchors from the prioritization. The 3 highest-scored are *shown* as urgent "
-            "only to demonstrate urgent-first ordering: no sensor has measured them.")
+stops = sensor_stops()
 
 with st.expander("Route settings", expanded=False):
     c1, c2, c3 = st.columns(3)
     depot_lat = c1.number_input("Yard latitude", value=ro.DORVAL_DEPOT["latitude"], format="%.5f")
     depot_lon = c2.number_input("Yard longitude", value=ro.DORVAL_DEPOT["longitude"], format="%.5f")
-    leave = (now + pd.Timedelta(minutes=10)).ceil("15min")          # the next quarter hour, on the (demo) clock
+    leave = (now + pd.Timedelta(minutes=10)).ceil("15min")          # the next quarter hour
     start = c3.time_input("Crew leaves the yard at", value=leave.time())
     c4, c5, c6 = st.columns(3)
     svc_u = c4.number_input("Minutes per 🔴 basin", 5, 60, ro.SERVICE_MIN["Urgent"])
@@ -168,7 +148,6 @@ st.subheader("Crew")
 monitored = set(basins["basin_id"])
 real = plan.stops[plan.stops["basin_id"].isin(monitored)]
 if real.empty:
-    st.caption("Demo stops have no sensor: crew actions are logged on monitored basins only.")
     st.stop()
 
 

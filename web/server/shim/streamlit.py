@@ -4,7 +4,7 @@ cache and its session state. This gives them both, so the same analysis code run
 import functools
 import time
 
-session_state = {}      # state.py sets data_mode / demo_t here before each computation (under its lock)
+session_state = {}
 _memos = []
 
 

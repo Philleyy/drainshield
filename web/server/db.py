@@ -19,7 +19,7 @@ users = Table(
     Column("id", Integer, primary_key=True),
     Column("email", String(254), nullable=False, unique=True),          # stored lower-case
     Column("name", String(120), nullable=False, default=""),
-    Column("role", String(20), nullable=False),                         # admin | engineering | crew | demo
+    Column("role", String(20), nullable=False),                         # admin | engineering | crew
     Column("password_hash", String(255), nullable=False),               # argon2id, never the password itself
     Column("active", Boolean, nullable=False, default=True),
     Column("must_change_password", Boolean, nullable=False, default=False),

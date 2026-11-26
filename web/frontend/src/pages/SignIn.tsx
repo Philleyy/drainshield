@@ -94,7 +94,7 @@ export default function SignIn() {
           {busy ? t('Signing in…') : t('Sign in')}
         </button>
         <p className="sub" style={{ margin: 0 }}>
-          {t('Forgot your password or need an account? Ask your DrainShield administrator. Judges: use the demo login on your invitation.')}
+          {t('Forgot your password or need an account? Ask your DrainShield administrator.')}
         </p>
       </form>
     </AuthLayout>

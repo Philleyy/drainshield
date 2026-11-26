@@ -43,34 +43,7 @@ sensor health, hydrographs and history):
   invert, outlet pipe, sump, **cast-iron trap installed or not**), with a live drawing.
 - **Truck route**: the basins to clean (🔴 urgent first, including those predicted to back up in the next 24 h of
   forecast rain), ordered into one route from the public works yard: map, total time, crew sheet (CSV) and
-  Google Maps links. A demo set (the 10 pilot sites) shows it before any sensor is installed.
-
-## Pitch demo: a whole day in 3 minutes
-
-Sidebar **Data → Pitch demo** replays one scripted day (Tue Nov 17) at 4 Dorval pilot sites, 12 sensors (site 4 =
-the 3 sensors on the table), on every page. A clock in the sidebar replaces "now": drag it, press **▶ Play**, or
-**Jump to** a moment. A banner tells the story at each minute, and the **Demo day** page shows the whole day: rain
-(measured and forecast), water levels, and every reading coloured by its mode.
-
-| Time | What happens | What it shows |
-| --- | --- | --- |
-| 00:00 | Dry night, 2 basins already 🟠, 1 battery at 14% | DRY mode (30 min), drainage history, sensor health |
-| 05:05 | Frost on S8-A's sensor | ⚪ sensor iced, never "flooding" |
-| 07:50 | S9-A goes silent (loose connector) | ⚫ offline after 60 min |
-| 09:30 | Surprise thunderstorm (no forecast) | sensors switch themselves to STORM (60 s) |
-| 11:00 | Forecast: 29 mm tonight | backend → WATCH (5 min); S4-A, S7-A 🔴 Inspect before storm |
-| 11:25 | Vacuum route sent | **Truck route** page, issues → "crew dispatched" |
-| 12:10–13:40 | Sensor fixed, S4-A and S7-A cleaned | crew taps on the route page, basins back to 🟢 |
-| 13:20–14:40 | S4-N1 radio outage | ⚫ offline, then every reading arrives late with its real time |
-| 18:00 | The storm starts | STORM mode everywhere; the cleaned basins keep up |
-| 20:25 | S7-N1: main sewer backs up | 🔴 Flooding: dispatch + slow-down signs (car wakes push water at homes) |
-| 23:20 | S7-N1 inspected, no issue | issue closed, cause reported downstream |
-
-**Scripted crew actions** (sidebar) plays the crews as in the story; turn it off to do it yourself live: on
-**Truck route**, *Generate*, *Send route to the crew*, then *✅ Cleaned* per stop (or **Log maintenance** on a
-basin's page). **↺ Reset demo** forgets the clicks. The demo files live in `data/demo/` (not in Git) and rebuild
-with `python demo_scenario.py`; they never touch your real sensor data. Start straight in demo mode with
-`http://localhost:8501/?demo=1`.
+  Google Maps links.
 
 ## Wireless prototype (Heltec LoRa, 3 basins)
 
@@ -168,8 +141,7 @@ dry-weather interval after 30 still minutes.
 | `polling_controller.py` | Forecast + water level → DRY / WATCH / STORM mode per sensor (`data/sensor_settings.json`) |
 | `predictive.py` | Past storms + forecast → predicted peak level in the next 24 h, recovery index, dry-baseline drift |
 | `route_optimizer.py` · `route_page.py` | Vacuum truck route: OSRM road times, nearest neighbour + 2-opt, crew sheet, Google Maps links |
-| `demo_scenario.py` · `demo_page.py` | The 24 h pitch demo: the scripted day (readings, forecasts, crew actions) and its overview page |
-| `tests/` | `python -m pytest tests`: routing, prediction, polling modes, LoRa decoding, demo day |
+| `tests/` | `python -m pytest tests`: routing, prediction, polling modes, LoRa decoding |
 
 **Data files:** `data/municipal_basins.csv` (the city's basins), `data/basin_priorities.csv` (pilot priority), `data/monitored_basins.csv` (basins with a
 sensor, made by **Add basin**), `data/live_readings.csv` (written by the bridge), `data/maintenance_log.csv`,
