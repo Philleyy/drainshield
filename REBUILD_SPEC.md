@@ -1,70 +1,115 @@
 # DrainShield: rebuild-from-scratch spec
 
-*Nov 26, 2026. For Raph, if he decides to start over in any language or framework. The current code is the reference implementation; [HANDOFF.md](HANDOFF.md) explains how it works. This file says **what must survive a rewrite**. Everything not listed here is open.*
+*Updated Nov 26, 2026, with Phil's direction after the Chambly interview. For Raph, if he starts over in any language or framework. [HANDOFF.md](HANDOFF.md) explains today's code; this file says **what the rebuilt product must do**. Anything not listed here is open.*
 
-## 1. The product in one picture
+## 1. What changed in this version
 
-A pod on the wall of each catch basin measures the distance down to the water. The product turns that into two answers for a city's public works team:
+- **No pitch demo, no judges' account, no sign-in page.** A role picker replaces sign-in. The demo is already removed from the code.
+- **One sensor per zone, not per basin.** Chambly's public works foreman knows which areas cause trouble. One sensor in a zone of similar basins can stand in for the rest.
+- **Half-day batches.** Contractors such as Sani-Vac are expensive, so work goes out in blocks of at least half a day. Cleaning takes about 5 minutes per basin, from arrival to done.
+- **Map first.** Foreman and engineering land on a colour-coded map with the forecast. The whole product is three screens.
+- **French first.** English can stay as an option.
+- **Colour-blind safe.** Every alert colour also has its own shape.
 
-1. **Which basins to clean before the next storm.**
-2. **Which basin is flooding right now.**
+![Target system](docs/handoff/system_target.svg)
 
-![System overview](docs/handoff/system.svg)
+## 2. Roles: a picker instead of a sign-in page
 
-## 2. Users and their jobs
+![Role picker](docs/handoff/wire_roles.svg)
 
-| Role | Must answer in under 10 seconds | Can change |
+| Role | Device | Must answer in seconds | Can change |
+|---|---|---|---|
+| **Équipe terrain** (crew) | phone or tablet | Which basin next? Is it done? | Done / problem / skip, per basin |
+| **Contremaître** (foreman) | computer or tablet | Which zones before the next storm? What's flooding now? | Build, print and send batches; log results (including the contractor's paper sheet) |
+| **Ingénierie / géomatique** (engineering, geomatics) | computer | Is the network set up right? | Everything the foreman can, plus basins, sensors, zones and their risk factors, and sensor upload keys |
+
+- **No password for now.** Phil decided anyone with the link can pick any role while this is a prototype. Add a check before real city data goes in.
+- **The choice is remembered on the device**, and can be changed from the top bar.
+- **Sensor upload keys stay.** Only real sensors can send readings.
+
+## 3. Screens: three in total
+
+Map and forecast stay on screen without scrolling. Everything else opens in a right-hand column.
+
+![Map page](docs/handoff/wire_main.svg)
+
+![The right-hand column](docs/handoff/wire_columns.svg)
+
+The crew screen has to be **very** easy, on both phone and tablet:
+
+![Crew screen](docs/handoff/wire_crew.svg)
+
+### Map legend: colour + shape, zones as outlines
+
+![Map legend](docs/handoff/map_legend.svg)
+
+- **Colour only ever means urgency**, so zones never get their own colours. A zone is tinted (with stripes, so the basins inside stay visible) only when its sensor raises an alert.
+- **What makes a zone risky** is shown with small symbols on its label.
+- **Filled icon** = a basin with a sensor. **Outline icon** = no sensor; it shows its zone's status, inferred.
+
+## 4. Zones: one sensor speaks for a group of basins
+
+![Zoning method](docs/handoff/zoning_method.svg)
+
+**Risk factors.** The first four come from Chambly's foreman; the rest are suggestions to check with cities.
+
+| Factor | Why it matters | Data to measure it |
 |---|---|---|
-| **Crew** (tablet, in the truck) | Where do I go next, what do I do there, is it done? | Log exceptions only: couldn't clean, obstruction found, inspected, no issue found |
-| **Engineering / public works** (desk) | Which basins before tonight's storm? What is flooding now? Is each sensor healthy? | Basins (as-built values), sensors, pre-storm runs (send, remove stops, departure time), on-call contact |
-| **Admin** | Who has access? | Accounts (invite only), sensor upload keys |
-| **Judges** (demo account) | What does the product do? | Only demo data, which is resettable |
+| Trees that drop leaves | grates clog in the fall | Québec lidar canopy height (1 m); city tree inventories |
+| Low point | water and grit collect there | lidar terrain model (1 m), or NRCan HRDEM |
+| Near the outfall / river | backs up when the river is high (spring) | city sewer network; river level |
+| History of problems | the best single predictor | complaints, flood reports, the foreman's list |
+| Large area draining in | more water and sediment | flow accumulation on the terrain model; `data/basin_priorities.csv` already has Dorval's catchment areas and low points |
+| Paved lots, construction sites, gravel lanes upstream | heavy sediment loads | aerial photos, building permits |
+| Winter sand route or snow dump nearby | spring grit | city operations |
+| Flat street or flat pipe | sediment settles instead of washing through | terrain slope; pipe slopes from the sewer network |
+| Basin design | no sump, small outlet, old basin | as-built plans, install date in the inventory |
+| What the cleaners found | the ground truth | new: recorded per basin after each batch |
 
-The rules behind every screen:
+**How to group, in practice:**
 
-- **Crew view first.** Raw telemetry, battery volts and hydrology parameters stay hidden until someone opens the engineering detail.
-- **Sensor problems never look like basin problems:** grey for the sensor, red, orange or green for the basin.
-- **Nothing routine to tap.** The sensor confirms a cleaning; people log only exceptions.
+1. **Start with rules.** Basins on the same street segments that share the same factors form a candidate zone. The foreman corrects it on the map in an afternoon.
+2. **Then improve the grouping.** Give each basin a profile (the factors above, scaled 0–1). Join neighbours only along the drainage network, so water from every basin in a zone ends up in the same branch. Merge the most similar neighbours until a zone is about one half-day batch. This is a "spatially constrained" clustering (agglomerative clustering on the network graph).
+3. **Put the sensor in the zone's weakest basin**, the one with the highest risk, so the zone gets the earliest warning.
+4. **Show a confidence per zone.** It's Low at first. It rises when the cleaners' findings agree with what the sensor said, and a zone that keeps disagreeing gets split.
 
-## 3. Screens
+Data: Québec's lidar data is now free, including 1 m terrain and canopy-height models covering most of southern Québec. NRCan's HRDEM is a 1 m alternative. Montréal-area cities also publish tree and canopy layers. A city's own sewer network and cleaning records have to come from the city.
 
-Required screens: sign-in and first-admin setup · Overview · Pre-storm run (with a printable / Excel cleaning list) · Crew view · Basins list + basin page · Add / edit basin · Sensors (health, raw readings) · Accounts · Upload keys · Change password. Global switches: Live / Pitch demo, French / English, light / dark.
+## 5. Half-day batches
 
-![Overview wireframe](docs/handoff/wire_overview.svg)
+![Batch planning](docs/handoff/batch_planning.svg)
 
-![Basin page wireframe](docs/handoff/wire_basin.svg)
+- **Defaults, editable per city:** shift 4 h, 5 min on site per basin, driving times from the road network.
+- **A batch always takes whole zones**, not just the sensor's basin, urgent zones first. It then fills the half day with nearby at-risk zones.
+- **Output:** a route, a printable sheet for the contractor, and the crew screen for city crews.
+- **Logging:** the foreman taps "all cleaned", then unticks the basins that weren't done. Optionally, he notes what was found (empty / half / full), because that's what improves the zones.
 
-![Crew and add-basin wireframes](docs/handoff/wire_crew_setup.svg)
-
-Screenshots of today's screens are in [HANDOFF.md, section 3](HANDOFF.md#the-site-today).
-
-## 4. Data model
+## 6. Data model
 
 ![Data model](docs/handoff/data_model.svg)
 
-- **Keep the asset (basin) apart from the device (sensor).** Today both readings and sensor status are keyed by `basin_id`, so a pod can't move and keep its history.
-- **Readings are append-only.** Ignore a duplicate (same sensor, same measured time), so retries are safe.
-- **Store times in UTC and show them in America/Toronto.** Bridges send local time without a zone today.
-- **Storm events and basin state are derived.** Recompute them from readings, rain and the log; caching is fine.
+- **Readings are append-only.** Ignore a duplicate (same sensor, same measured time).
+- **Store times in UTC and show them in America/Toronto.**
+- **Zone state = its sentinel's basin state.** Recompute derived things, and cache them.
 
-## 5. The decision engine: behaviour to keep
+## 7. The decision engine (keep today's rules)
 
-### 5.1 Water level
+The engine judges **sensor basins** exactly as today. The zone layer sits on top of it.
+
+![Pipeline in the target](docs/handoff/pipeline_target.svg)
+
+### 7.1 Water level
 
 ![Basin cross-section](docs/handoff/basin_section.svg)
 
 ```
-level_cm = (sensor_height − distance) − outlet_invert        (all in cm above the sump floor)
+level_cm = (sensor_height − distance) − outlet_invert     (cm above the sump floor)
          = 0 at the outlet invert, the dry-weather resting level
 ```
 
-**Self-calibration.** An hour counts as steady when it has ≥ 2 readings that vary < 1 cm. Take the first 48 steady hours after install. With ≥ 6 of them, the median distance *is* the distance to the invert. If the as-built invert depth is known and the learned value is more than 15 cm off, warn (sump not refilled, or bracket elsewhere). If the invert depth is unknown, the learned value sets it.
+**Self-calibration:** an hour counts as steady when it has ≥ 2 readings that vary < 1 cm. Take the first 48 steady hours after install. With ≥ 6 of them, the median distance *is* the distance to the invert. If that's more than 15 cm off the as-built depth, warn.
 
-### 5.2 Pipeline
-
-![Pipeline](docs/handoff/pipeline.svg)
-
-### 5.3 Storm diagnosis
+### 7.2 Storm diagnosis and prediction
 
 ![Storm diagnosis](docs/handoff/storm_diagnosis.svg)
 
@@ -73,112 +118,93 @@ storm           = hours with rain, split by a dry gap ≥ 6 h; peak searched unt
 expected_rise   = k_clean × max(peak_intensity, 5 mm/h)
 k_clean         = mean(peak / intensity) over the first 3 storms that rose ≥ 3 cm
                   (before that: 0.3 cm per mm/h × catchment_m² / 600)
-rise_ratio      = peak / expected_rise
-capacity_left   = 100% if rise_ratio ≤ 1.3, else 100 / rise_ratio
+rise_ratio      = peak / expected_rise ;  capacity_left = 100% if ≤ 1.3, else 100 / rise_ratio
 drain_time      = minutes from end of rain until level ≤ 3 cm
 status (storm)  = worst of grade(rise_ratio; 2, 4, 8) and grade(drain_time; 30, 90, 180 min)
 grate covered   = expected_rise ≥ 6 cm and rise_ratio < 0.4 (Watch) or < 0.2 (Clean soon)
-sudden blockage = capacity ≤ 25% right after a storm at ≥ 70%
-status (basin)  = worst storm since the last "Cleaned" or "No issue found", worst with sediment
-sediment_cm     = at last cleaning + rain_mm × yield_kg/m²/yr ÷ 1000 mm × catchment_m² ÷ (1600 kg/m³ × basin_area_m²) × 100
+status (basin)  = worst storm since the last cleaning, worst with the sediment estimate
+
+predicted_peak  = level_at_rain_start + k_now × i_obs × (i_forecast / i_obs)^p   (p = 1 lighter, 2 heavier)
+red_at          = the lower of 40 cm and the level 30 cm below the grate
+red if predicted_peak ≥ red_at ; orange if ≥ red_at ÷ 2, or drains 3× slower than when clean
 ```
 
 `grade(x; a, b, c)` gives OK if x ≤ a, Watch if ≤ b, Clean soon if ≤ c, and Urgent otherwise.
 
-### 5.4 Pre-storm prediction
+### 7.3 Triage, zones and the issue cycle
 
-```
-predicted_peak = level_at_rain_start + k_now × i_obs × (i_forecast / i_obs)^p
-    k_now      = cm per mm/h in the latest storm since the last cleaning
-    p          = 1 if i_forecast ≤ i_obs, else 2 (restricted outlet ≈ orifice)
-    i_forecast = wettest forecast hour in the next 24 h (ignored below 1 mm/h)
-recovery_index = drain_time_now / drain_time_clean (both floored at 10 min)
-red_at         = the lower of 40 cm and the level 30 cm below the grate
-🔴  predicted_peak ≥ red_at
-🟠  predicted_peak ≥ red_at ÷ 2, or recovery_index ≥ 3
-```
+![Triage](docs/handoff/triage.svg)
 
-### 5.5 Triage and lifecycle
+The first matching rule gives each **sensor** its status. Its **zone** takes that status, and the zone's other basins show it with outline icons.
 
-![Triage rules](docs/handoff/triage.svg)
+![Issue cycle in the target](docs/handoff/lifecycle_target.svg)
 
-![Issue lifecycle](docs/handoff/lifecycle.svg)
+### 7.4 Every constant in one place
 
-### 5.6 Every constant in one place
+All of these are first guesses. Keep them in one config file the city can tune.
 
-All are first guesses, to be tuned on pilot data. Keep them in one config file.
-
-| Constant | Value | Today in |
+| Constant | Value | Source |
 |---|---|---|
 | Normal band / backing up | 10 cm / 40 cm above the invert | `processing.py` |
-| "Drained" / smallest rise worth judging | within 3 cm / 3 cm | `processing.py` |
 | Sensor silent → offline | 60 min | `processing.py` |
-| Battery empty–full / low / critical | 3.20–3.60 V / 3.35 V / 3.25 V | `processing.py` |
 | Sediment Watch / Clean soon | 60% / 80% of the sump | `processing.py` |
 | Heavy rain (clean before storm) | 15 mm in 12 h; 10 mm Mar 15–May 31 and Sep 15–Nov 30 | `weather.py`, `web/server/season.py` |
-| Sump emptied → cleaning logged | ≥ 10 cm below the invert | `web/server/state.py` |
-| Dry-baseline drift (trap blocked / evaporation) | +3 cm / −5 cm over 3 days | `predictive.py` |
-| Grate covered while raining | flat (±1 cm) while neighbours within 400 m rise ≥ 5 cm in 45 min | `web/server/state.py` (to validate) |
-| Route | road times from OSRM; fallback straight line × 1.35 at 25 km/h; on site 20 / 15 / 10 min (urgent / inspect / offline) | `route_optimizer.py` |
+| Sump emptied → cleaning logged | ≥ 10 cm below the invert (sensor basins only) | `web/server/state.py` |
+| **Time on site per basin** | **≈ 5 min** | Chambly public works foreman |
+| **Batch length** | **half a day (default 4 h)** | Chambly public works foreman |
+| Battery empty–full | 3.20–3.60 V | `processing.py` |
 
-## 6. Sensor interface
+## 8. Sensor interface (unchanged)
 
 ```
 POST /api/ingest
-Authorization: Bearer dsk_<key id>_<secret>          (only sha256(secret) is stored)
-{"readings": [
-  {"basin_id": "S4-A", "timestamp": "2026-11-17T10:05:00", "distance_cm": 118.4,
-   "battery_v": 3.52, "temp_c": 4.0, "flags": 0, "mode": "STORM"}      ← up to 5,000 per call
-]}
+Authorization: Bearer dsk_<key id>_<secret>
+{"readings": [{"basin_id": "B-14", "timestamp": "2026-11-17T10:05:00", "distance_cm": 118.4,
+               "battery_v": 3.52, "flags": 0, "mode": "STORM"}]}           ← up to 5,000 per call
 → {"accepted": 1, "duplicates": 0, "modes": {}, "season": {"key": "fall", "dry_every_s": 900}}
 ```
 
-- **Flags (bit field):** 0x01 no echo · 0x02 water at the sensor · 0x04 suspect · 0x08 iced · 0x10 clock gap · 0x20 on USB.
-- **Recommended change:** fill `modes` with each sensor's wanted reading mode, so the server decides, instead of the laptop script `polling_controller.py`.
-- A packet can't reach a sleeping sensor, so firmware must still jump to STORM by itself when the water moves.
+**Flags:** 0x01 no echo · 0x02 water at the sensor · 0x04 suspect · 0x08 iced · 0x10 clock gap · 0x20 on USB. The reply's `modes` should carry each sensor's wanted reading mode, so the server decides it.
 
 ![Reading modes](docs/handoff/reading_modes.svg)
 
-## 7. Constraints that survive any rewrite
+## 9. Constraints that survive any rewrite
 
-- **Free, with no credit card, for now.** Portable, standard code that can move host.
-- **Never add work or cost for the city.**
-- **French and English** (Québec municipalities).
-- **Honest UI:** sediment and capacity are labelled as estimates.
-- **The pitch demo works with no rain and no internet:** fallbacks for the weather, routing and map tiles.
-- **Invite-only accounts:** passwords hashed (argon2id today), sessions in HttpOnly cookies, rate-limited sign-in.
-- **Design:** light, structured workspace (dark optional); forecast on top; table + map split; one accent colour; no generic "AI-looking" templates.
+- **Three screens:** role picker, map page, crew screen. New things go in the map page's column, not new pages.
+- **The crew screen:** one basin at a time, buttons ≥ 56 px, phone and tablet.
+- **French by default.** English optional.
+- **Colour + shape** for every status. Sensor problems (grey square) never look like basin problems.
+- **Never add work or cost for the city.** Contractors keep their paper; the foreman logs in a few taps.
+- **Estimates are labelled as estimates** (sediment, capacity, inferred zone status).
+- **Free, with no credit card, for now.** Portable, standard code.
 
-## 8. Suggested architecture, and what's open
+## 10. Suggested architecture
 
 ![Suggested architecture](docs/handoff/target_architecture.svg)
 
-| Choice | Today | Open to |
-|---|---|---|
-| Language / framework | Python FastAPI + React/TypeScript | anything Raph prefers |
-| Database | PostgreSQL (SQLite locally) | any SQL; a time-series extension is optional |
-| Engine | Python modules with global state | a pure library: inputs in, state out |
-| Map | Leaflet + OpenStreetMap tiles | any; must degrade offline |
-| Routing | public OSRM server | self-hosted OSRM, or another engine |
-| Hosting | Ample free + Cloudflare relay for McGill | anything free with no card, until going public |
+Add a **zone job** next to the analysis worker. It recomputes the suggested zones when basins, factors or cleaning results change, and never overwrites the foreman's edits.
 
-## 9. What to carry over, and how to know it's done
+## 11. What to carry over, and how to know it's done
 
-**Carry over as is:**
-- `data/municipal_basins.csv` and `data/basin_priorities.csv` (the city's basins and pilot priority)
-- The demo day: `demo_scenario.py` + `web/server/demo_registry.csv`
-- The translations: `web/frontend/src/fr.ts`, `web/server/fr.py`
-- The 43 tests (`tests/`, `web/tests/`) as acceptance cases
+**Carry over:** `data/municipal_basins.csv`, `data/basin_priorities.csv` (catchment areas and low points: a head start on zoning), the French translations (`web/frontend/src/fr.ts`, `web/server/fr.py`), and the 39 remaining tests.
 
-**Gap to close first:** the storm diagnosis in `processing.py` has no direct unit tests. Write golden cases from the demo day *before* rewriting it. (The demo's S4-A should flag "clean before storm" at 11:00.)
+**Gap:** the end-to-end test that used the pitch demo was removed along with the demo. Write a small synthetic storm (a few basins, one rain event, a cleaning) as a test fixture *before* rewriting the engine.
 
 **Done when:**
-- [ ] A sensor uploads with a key; a resent batch adds nothing
-- [ ] A new sensor learns the invert after 6 steady dry hours, and warns when it's > 15 cm off the plans
-- [ ] A storm rising > 2× the clean rise turns the basin orange; > 8× or water at the sensor turns it red
-- [ ] A flagged basin + heavy rain in the next 12 h turns red ("clean before storm") and joins a pre-storm run, urgent first
-- [ ] Water ≥ 10 cm below the invert logs a cleaning by itself; the next normal rain confirms it
-- [ ] A sensor silent for 60 min shows grey, never red
-- [ ] The demo day plays from 00:00 to 23:59 with no internet
-- [ ] Every screen works in French and English, and the crew view on a tablet
-- [ ] All of today's tests are ported and passing
+
+- [ ] The first screen offers the three roles, in French, and remembers the choice
+- [ ] The map shows zones as outlines with letters and factor symbols, and basins with colour + shape icons, with the forecast above it, without scrolling
+- [ ] A zone's sensor turning orange or red stripes the zone and turns its other basins into outline icons
+- [ ] Engineering can add a basin, place a sensor, draw a zone and tick its factors from the column
+- [ ] The foreman can build a batch that fills about 4 h at 5 min per basin, print it, and log it as "all cleaned except…"
+- [ ] The crew screen works one-handed on a phone and on a tablet
+- [ ] A sensor silent for 60 min shows a grey square, never red
+- [ ] Sensor uploads keep working, and a resent batch adds nothing
+- [ ] Today's tests are ported and passing, plus the synthetic storm test
+
+**Questions to settle with Phil:**
+
+- Should zone size follow the half-day batch, or the drainage network only?
+- Can Chambly share its sewer network, basin inventory and past cleaning records?
+- How many sensors per city in a pilot?
+- What does the contractor's paper sheet look like, so the printout matches it?

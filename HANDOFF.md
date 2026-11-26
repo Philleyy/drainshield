@@ -1,13 +1,15 @@
 # DrainShield: handoff to Raph
 
-*Written Nov 26, 2026, from the code at commit `2dc9452` (Nov 23). Phil (Philippe Bordeleau) is handing the software side to Raph. Want to start over? Read [REBUILD_SPEC.md](REBUILD_SPEC.md) instead: it describes what to build, not how today's code does it.*
+*Written Nov 26, 2026. Phil (Philippe Bordeleau) is handing the software side to Raph. This file describes **today's code**. Where the product is going (role picker, one sensor per zone, half-day batches, map first, French first) is in [REBUILD_SPEC.md](REBUILD_SPEC.md), whether you rebuild or refactor.*
 
 ## 1. The short version
 
 - **You own the website.** You decide the stack, the structure, and what to rewrite. Phil handles the hardware, the municipalities, and the competition.
 - **A rewrite is allowed, but read the code first.** It's already a standard stack: FastAPI + PostgreSQL + React/TypeScript. The valuable part is the decision logic (section 4), not the framework.
 - **Hosting and domain are your call, with no rush.** The current site is free and works for demos. Hold off on buying a domain: the name "DrainShield" isn't final yet.
-- **Everything passes today:** 27 engine tests (`tests/`) and 16 server tests (`web/tests/`).
+- **The direction changed on Nov 26** after an interview with Chambly's public works foreman. Read section 2 of this file, then [REBUILD_SPEC.md](REBUILD_SPEC.md).
+- **The pitch demo and the judges' account were removed** from the code on Nov 26.
+- **Everything passes today:** 24 engine tests (`tests/`) and 15 server tests (`web/tests/`).
 
 ## 2. What DrainShield is
 
@@ -22,6 +24,13 @@ A sensor pod sits on the wall of a street catch basin (puisard), about 400 mm be
 
 **Business model (decided Nov 25):** DrainShield owns the pods and does all field work (installs, repairs, batteries). The city gets a reliable product and software. **Hard constraint: DrainShield must not add to the city's workload or budget.**
 
+**New direction (Nov 26), from Chambly's public works foreman:**
+- **Not a sensor in every basin.** Put one sensor per **zone** of basins with similar conditions: leafy streets, low points, near the outfall or river, a history of problems.
+- **Cleaning goes out in half-day batches.** Contractors such as Sani-Vac are expensive. Cleaning takes about 5 minutes per basin. The contractor works on paper; the foreman logs the result.
+- **The website follows:** a role picker instead of sign-in, a map-first page for the foreman and engineering, a very simple crew screen for phone and tablet, French first, and alert icons that use shape as well as colour.
+
+![The map page in the new direction](docs/handoff/wire_main.svg)
+
 ## 3. Where things stand (Nov 26, 2026)
 
 | Done | Not done / open |
@@ -29,30 +38,17 @@ A sensor pod sits on the wall of a street catch basin (puisard), about 400 mm be
 | Web app live on Ample, with sign-in, roles, upload keys | Final sensor: **60 GHz radar (Acconeer A121/XM125)** is the assumption, but the code is still written around ultrasonic sensors |
 | Streamlit dashboard (original prototype, kept as a fallback) | Cellular (LTE) link not solved |
 | All 5,035 Dorval catch basins on the map (Ville de Montréal open data) | Battery life not bench-tested (target 5–10 years) |
-| Pitch demo: a scripted 24-hour storm day, 4 pilot sites, 12 sensors | Web app hasn't passed a full dry run yet |
+| Pitch demo removed (Nov 26): the site shows live data only | Web app hasn't passed a full dry run yet |
 | Wireless prototype: Heltec LoRa nodes → USB receiver → laptop → website | Name not final; no domain |
-| ESP8266 Wi-Fi sketch posting straight to the website (being tested) | One sensor per basin, or only critical ones? Undecided |
+| ESP8266 Wi-Fi sketch posting straight to the website (being tested) | Sensor strategy: one per zone (decided Nov 26) |
 | Pre-storm predictions, truck route, crew view, French and English | Thresholds are first guesses, not tuned on real pilot data |
+| | Zones, half-day batches, role picker: designed, not built ([spec](REBUILD_SPEC.md)) |
 
-### The site today
+### The screens, from now on
 
-These screenshots come from the pitch demo, run locally. The map tiles are blank only because the screenshot machine had no internet.
+The current screens will be redesigned, so there are no screenshots here. The new sketches are in [REBUILD_SPEC.md](REBUILD_SPEC.md#3-screens-three-in-total). The crew screen has to be the simplest of all:
 
-**11:00, before the storm.** The forecast says 29 mm tonight, two basins turn red ("clean before storm"), and a 3-stop run is proposed.
-
-![Overview before a storm](docs/handoff/site_overview_prestorm.png)
-
-**The basin page:** what the sensor saw, the likely cause, the next step, a to-scale cross-section, and two numbers.
-
-![Basin page](docs/handoff/site_basin.png)
-
-**12:45, crew view.** Stops tick themselves off when the sensor sees the sump emptied.
-
-![Crew view](docs/handoff/site_crew.png)
-
-**20:35, during the storm.** One basin is backing up, and the crew is called before residents phone in.
-
-![Overview during a storm](docs/handoff/site_overview_storm.png)
+![Crew screen sketch](docs/handoff/wire_crew.svg)
 
 ## 4. How data becomes a decision
 
@@ -111,7 +107,7 @@ The basin gets 🔴 if the predicted peak is ≥ 40 cm or within 30 cm of the gr
 
 ![Issue lifecycle](docs/handoff/lifecycle.svg)
 
-The run route (`route_optimizer.py`) uses nearest-neighbour then 2-opt, with urgent stops first. Road times come from the free OSRM server, with a straight-line fallback so the demo never breaks. Runs start from the Dorval public works yard.
+The run route (`route_optimizer.py`) uses nearest-neighbour then 2-opt, with urgent stops first. Road times come from the free OSRM server, with a straight-line fallback so a route is still planned offline. Runs start from the Dorval public works yard.
 
 ### 4.8 How often sensors read
 
@@ -131,21 +127,20 @@ Other folders: `arduino/` (3 sketches), `hardware/enclosure/` (pod CAD, STEP/STL
 
 ## 6. Users: who can do what
 
-Accounts are invite-only: an admin creates them, and there's no sign-up page.
+Today, accounts are invite-only: an admin creates them, and there's no sign-up page. **This is going away:** the spec replaces sign-in with a role picker (crew, foreman, engineering / geomatics). The old "demo" role was retired, and those accounts can no longer sign in.
 
 | Role | Can |
 |---|---|
 | **admin** | Everything, plus create/disable accounts, reset passwords, make and revoke sensor upload keys |
 | **engineering** | Add/edit/remove basins and sensors, change settings, plus everything crew can do |
 | **crew** | See the network, open basins, follow runs, log maintenance |
-| **demo** | Judges' account: always in the pitch demo; can try actions on demo data (resettable), never touches live data |
 
 **What users can change:**
 - **Basins**, using as-built plan values (no catalogue models): ID, city ID, address, GPS, inside diameter (405/610/915/1220 mm), outlet invert depth (optional), outlet pipe (150–450 mm), sump (0/300/500 mm), sensor depth (default 400 mm), cast-iron trap yes/no. A basin can also be picked from the city map.
 - **Maintenance log:** Crew dispatched, Inspected, Obstruction found, Requires further investigation, Cleaned / vacuumed (+ measured sediment), No issue found, Sensor installed / re-installed.
 - **Pre-storm run:** remove stops, set the departure time.
 - **Settings:** on-call foreman name and phone.
-- **Switches:** Live / Pitch demo, French / English, light / dark.
+- **Switches:** French / English, light / dark.
 
 ## 7. Hardware context (it keeps changing)
 
@@ -181,17 +176,17 @@ Settings are environment variables only (`DATABASE_URL`, `SETUP_TOKEN`, `COOKIE_
 - Never add work or cost for the city. The sensor confirms cleanings, instead of crews tapping "cleaned".
 - A crew member answers "where, what, what do I do" in under 10 seconds on a tablet.
 - Sensor problems (grey) never look like basin problems (red, orange, green).
-- French and English.
+- French first; English optional.
 - Estimates (sediment, capacity) are labelled as estimates.
-- The pitch demo works with no rain and no internet.
-- Invite-only accounts, including a judges' demo account.
+- Colour **and** shape for every alert, so colour-blind users can read the map.
+- As few pages as possible: map and forecast visible together; adding basins and zones in a side column.
 
 ## 11. Suggested first week
 
 1. **Get access** from Phil: GitHub collaborator, an admin account on the live site, and Ample + Cloudflare access if you take over hosting.
 2. **Run the tests:** `python -m pytest -q tests` in the repo root, then `cd web && python -m pytest -q`.
-3. **Run the web app locally,** switch to **Pitch demo**, and use "Jump to a moment" to step through the day.
+3. **Run the web app locally** and feed it a bench sensor (`sensor_bridge.py` or the ESP8266 sketch). There is no demo data any more.
 4. **Read the docstrings** of `processing.py`, `predictive.py` and `web/server/state.py`. They explain the *why*.
 5. **Decide:** keep and refactor, or rebuild from [REBUILD_SPEC.md](REBUILD_SPEC.md).
 
-**Ask Phil about:** the sensor-per-basin strategy, which city the next demo targets (L'Assomption asked for one), and anything in the "open" column of section 3.
+**Ask Phil about:** how zones should be drawn in practice, which city data he can get (sewer network, cleaning records), the L'Assomption demonstration, and anything in the "open" column of section 3.
